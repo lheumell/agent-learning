@@ -58,6 +58,14 @@ quand vous avez compris le flux.
 5. **Ajouter des capacités** dans `src/agent.ts` (`actionProviders`) : `erc20ActionProvider`, `wethActionProvider`, `pythActionProvider` (prix), `defillamaActionProvider`… Relisez la section limites ci-dessous avant d'ajouter un provider qui signe des messages.
 6. **Plus tard : une stratégie.** Écrivez-la en code déterministe (règles, seuils) et laissez le LLM seulement expliquer ou ajuster des paramètres bornés. Faites-la tourner en simulation sur des prix réels avant tout autre chose.
 
+## Prix (`src/prices.ts`)
+
+- L'agent dispose d'un outil `get_price` (lecture seule) alimenté par **Pyth Hermes**, sans clé API.
+- Les identifiants de flux sont **résolus à l'exécution** (flux exact `SYMBOL/USD`), pas codés en dur.
+- **Contrôle qualité avant usage :** un prix de plus de 60 s ou avec une incertitude supérieure à 1 % est refusé. Un prix périmé est pire que pas de prix.
+- `StaticSource` fournit des prix déterministes pour les tests et les futurs backtests.
+- ⚠ **Pas encore validé contre l'API réelle** : écrit et testé avec des réponses simulées, car le réseau était bloqué. Lancez `npm run price -- ETH` chez vous. Si ça échoue sur « réponse inattendue », le format de l'API a changé et le correctif est dans `PythSource`.
+
 ## Limites à connaître
 
 - **Le garde-fou ne couvre que `sendTransaction`.** Signer un message (`signMessage`, `signTypedData`) n'est pas bloqué, or certains protocoles autorisent des paiements par signature (permits ERC-20, x402). N'ajoutez pas ces providers sans étendre `Guard`.
@@ -75,6 +83,7 @@ Pas dans ce projet : la chain est codée en dur sur Base Sepolia et le garde-fou
 | Commande | Rôle |
 |---|---|
 | `npm run wallet` | génère/affiche le wallet de test |
+| `npm run price -- ETH` | affiche le prix (Pyth) après contrôle de qualité |
 | `npm run agent -- "…"` | lance l'agent avec une instruction |
 | `npm run audit` | affiche le journal du garde-fou (`data/audit.jsonl`) |
 | `npm test` | tests du garde-fou et du wallet (hors ligne) |
@@ -88,4 +97,5 @@ Pas dans ce projet : la chain est codée en dur sur Base Sepolia et le garde-fou
 | `src/wallet.ts` | branche le garde-fou sur AgentKit |
 | `src/agent.ts` | la boucle agent : Claude ↔ outils |
 | `src/config.ts` | lecture des limites depuis `.env` |
+| `src/prices.ts` | source de prix Pyth + contrôle de qualité + outil `get_price` |
 | `tests/` | ce que le garde-fou doit garantir |

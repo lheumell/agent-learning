@@ -6,6 +6,7 @@ import type { Hex } from "viem";
 import { buildActions, runAgent } from "./agent.js";
 import { loadGuardConfig } from "./config.js";
 import { Guard } from "./guard.js";
+import { PythSource, getCheckedPrice } from "./prices.js";
 import { createWallet } from "./wallet.js";
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -20,6 +21,13 @@ async function main() {
     }
     console.log(`Adresse : ${addr}`);
     console.log("Faucet Base Sepolia : https://portal.cdp.coinbase.com/products/faucet");
+    return;
+  }
+
+  if (cmd === "price") {
+    const symbol = rest[0] ?? "ETH";
+    const q = await getCheckedPrice(new PythSource(), symbol);
+    console.log(`${q.symbol}/USD = ${q.priceUsd.toFixed(2)} (±${q.confidenceUsd.toFixed(2)}) publié ${q.publishedAt.toISOString()} [${q.source}]`);
     return;
   }
 
@@ -50,7 +58,7 @@ async function main() {
     return;
   }
 
-  console.log("Commandes : npm run wallet | npm run agent -- \"...\" | npm run audit");
+  console.log("Commandes : npm run wallet | npm run price -- ETH | npm run agent -- \"...\" | npm run audit");
 }
 
 main().catch((e) => {

@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { AgentKit, walletActionProvider, type Action } from "@coinbase/agentkit";
 import { zodToJsonSchema } from "zod-to-json-schema";
+import { PythSource, priceActionProvider } from "./prices.js";
 import type { GuardedWalletProvider } from "./wallet.js";
 
 const SYSTEM = `Tu es un agent d'apprentissage sur Base Sepolia (testnet, fonds sans valeur).
@@ -12,9 +13,9 @@ Tu disposes d'outils pour consulter et utiliser un wallet. Règles :
 export async function buildActions(wallet: GuardedWalletProvider): Promise<Action[]> {
   const kit = await AgentKit.from({
     walletProvider: wallet,
-    // Commencez petit : 2 actions (voir le solde, envoyer de l'ETH).
+    // Commencez petit : solde, envoi d'ETH et prix (lecture seule).
     // Pour ajouter des capacités (erc20, weth, pyth, defillama…), importez d'autres action providers.
-    actionProviders: [walletActionProvider()],
+    actionProviders: [walletActionProvider(), priceActionProvider(new PythSource())],
   });
   return kit.getActions();
 }

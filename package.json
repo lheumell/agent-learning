@@ -8,7 +8,8 @@
     "wallet": "tsx src/index.ts wallet",
     "agent": "tsx src/index.ts agent",
     "audit": "tsx src/index.ts audit",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "price": "tsx src/index.ts price"
   },
   "keywords": [],
   "author": "",
