@@ -66,6 +66,40 @@ quand vous avez compris le flux.
 - `StaticSource` fournit des prix déterministes pour les tests et les futurs backtests.
 - ⚠ **Pas encore validé contre l'API réelle** : écrit et testé avec des réponses simulées, car le réseau était bloqué. Lancez `npm run price -- ETH` chez vous. Si ça échoue sur « réponse inattendue », le format de l'API a changé et le correctif est dans `PythSource`.
 
+## Stratégie et backtest (`src/strategy.ts`, `src/backtest.ts`)
+
+Une stratégie **déterministe** (croisement de moyennes mobiles 10/30) et un simulateur pour la tester **sans argent**.
+Le LLM n'intervient pas ici : on veut un comportement reproductible et vérifiable.
+
+```bash
+npm run backtest                                  # une série simulée
+npm run backtest -- --seeds 300                   # 300 séries : voir la distribution, pas un cas favorable
+npm run backtest -- --seeds 300 --drift 0.0005    # marché haussier
+npm run backtest -- --seeds 300 --fee 0 --slippage 0
+npm run backtest -- --csv prix.csv --fast 5 --slow 20
+```
+
+Le simulateur évite les erreurs classiques : le signal calculé sur la barre *i* est exécuté au prix de la barre *i+1*
+(sinon on triche en connaissant le futur), chaque trade paie frais et slippage, et le résultat est comparé à
+« acheter et garder » avec les mêmes coûts.
+
+**Résultats sur 300 séries simulées de 1000 barres (SMA 10/30, frais 0,1 %, slippage 0,05 %) :**
+
+| Scénario | Médiane stratégie | Médiane acheter-garder | Bat acheter-garder |
+|---|---|---|---|
+| Marche aléatoire, avec frais | −6,5 % | −5,0 % | 42 % des séries |
+| Marche aléatoire, **sans** frais | −0,7 % | −4,8 % | 50 % des séries |
+| Tendance haussière, avec frais | +23,5 % | +56,6 % | 9 % des séries |
+
+Ce qu'il faut en retenir :
+- **Sur un marché sans tendance, la stratégie n'a aucun avantage** (50 % sans frais : un pile ou face). Avec les frais, elle perd en moyenne.
+- Elle fait ~18 allers-retours par série et paie ~35 USD de frais sur 1000 : **les coûts de transaction sont l'adversaire principal**.
+- Dans un marché qui monte, elle gagne de l'argent mais fait presque toujours moins bien que ne rien faire.
+- Un seul backtest flatteur ne prouve rien. Regardez toujours la distribution (`--seeds`) et testez sur des données que vous n'avez pas utilisées pour choisir les paramètres.
+
+⚠ Les prix simulés n'ont ni tendances réelles, ni chocs, ni cycles de volatilité. Pour juger sur du réel, fournissez un CSV d'historique (`--csv`).
+La stratégie **n'est pas branchée** au wallet ni à l'agent : c'est volontaire. Le branchement viendra après, via le garde-fou.
+
 ## Limites à connaître
 
 - **Le garde-fou ne couvre que `sendTransaction`.** Signer un message (`signMessage`, `signTypedData`) n'est pas bloqué, or certains protocoles autorisent des paiements par signature (permits ERC-20, x402). N'ajoutez pas ces providers sans étendre `Guard`.
@@ -83,6 +117,7 @@ Pas dans ce projet : la chain est codée en dur sur Base Sepolia et le garde-fou
 | Commande | Rôle |
 |---|---|
 | `npm run wallet` | génère/affiche le wallet de test |
+| `npm run backtest -- --seeds 300` | teste la stratégie sur des séries simulées (ou `--csv` pour de vrais prix) |
 | `npm run price -- ETH` | affiche le prix (Pyth) après contrôle de qualité |
 | `npm run agent -- "…"` | lance l'agent avec une instruction |
 | `npm run audit` | affiche le journal du garde-fou (`data/audit.jsonl`) |
@@ -97,5 +132,8 @@ Pas dans ce projet : la chain est codée en dur sur Base Sepolia et le garde-fou
 | `src/wallet.ts` | branche le garde-fou sur AgentKit |
 | `src/agent.ts` | la boucle agent : Claude ↔ outils |
 | `src/config.ts` | lecture des limites depuis `.env` |
+| `src/strategy.ts` | stratégie de croisement de moyennes mobiles (SMA), pure et sans effet de bord |
+| `src/backtest.ts` | simulateur : frais, slippage, exécution à la barre suivante, comparaison à « acheter-garder » |
+| `src/simulate.ts` | prix simulés reproductibles (graine) + lecture de CSV |
 | `src/prices.ts` | source de prix Pyth + contrôle de qualité + outil `get_price` |
 | `tests/` | ce que le garde-fou doit garantir |

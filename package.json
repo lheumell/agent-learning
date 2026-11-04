@@ -9,7 +9,8 @@
     "agent": "tsx src/index.ts agent",
     "audit": "tsx src/index.ts audit",
     "typecheck": "tsc",
-    "price": "tsx src/index.ts price"
+    "price": "tsx src/index.ts price",
+    "backtest": "tsx src/index.ts backtest"
   },
   "keywords": [],
   "author": "",
