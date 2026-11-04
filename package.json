@@ -1,0 +1,32 @@
+{
+  "name": "agent-learning",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "vitest run",
+    "wallet": "tsx src/index.ts wallet",
+    "agent": "tsx src/index.ts agent",
+    "audit": "tsx src/index.ts audit",
+    "typecheck": "tsc"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "private": "true",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.4.0",
+    "@coinbase/agentkit": "^0.10.4",
+    "dotenv": "^18.0.9",
+    "viem": "^2.38.3",
+    "zod": "^4.6.7",
+    "zod-to-json-schema": "^3.25.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^5.1.0"
+  }
+}
