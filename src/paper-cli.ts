@@ -1,6 +1,6 @@
 import { parseFlags } from "./cli-utils.js";
 import { PaperTrader, runPaper, type PaperStatus } from "./paper.js";
-import { PythSource } from "./prices.js";
+import { CoinbaseSource } from "./prices.js";
 import { SmaCrossover } from "./strategy.js";
 import { normalizeSymbol } from "./prices.js";
 
@@ -47,7 +47,7 @@ export async function paperCommand(args: string[], log: (s: string) => void = co
   const trader = PaperTrader.open({
     symbol,
     makeStrategy: () => new SmaCrossover(fast, slow),
-    source: new PythSource(),
+    source: new CoinbaseSource(),
     exec: { initialCashUsd: num("capital", 1000), feeRate: num("fee", 0.001), slippageRate: num("slippage", 0.0005) },
     statePath: `data/paper-${symbol}.json`,
     journalPath: `data/paper-${symbol}.jsonl`,

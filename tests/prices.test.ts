@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CoinbaseSource,
   PythSource,
   StaticSource,
   assertQuality,
@@ -109,5 +110,67 @@ describe("getCheckedPrice + StaticSource", () => {
   });
   it("signale un symbole inconnu", async () => {
     await expect(getCheckedPrice(new StaticSource({}), "ETH")).rejects.toThrow(/pas de prix/);
+  });
+});
+
+describe("CoinbaseSource", () => {
+  // Vraie réponse de https://api.exchange.coinbase.com/products/ETH-USD/ticker
+  const REAL = {
+    ask: "2418.72", bid: "2418.65", volume: "157491.8079244", trade_id: 852133454,
+    price: "2418.66", size: "0.92", time: "2026-11-04T15:56:44.711134654Z", rfq_volume: "1381.080083",
+  };
+  const serve = (body: unknown, status = 200, calls: string[] = []) =>
+    (async (url: string) => {
+      calls.push(url);
+      return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
+    }) as unknown as typeof fetch;
+
+  it("lit la vraie réponse : prix, demi-écart bid/ask, heure tronquée à la milliseconde", async () => {
+    const calls: string[] = [];
+    const q = await new CoinbaseSource(serve(REAL, 200, calls)).getPrice("eth");
+    expect(calls[0]).toBe("https://api.exchange.coinbase.com/products/ETH-USD/ticker");
+    expect(q.symbol).toBe("ETH");
+    expect(q.priceUsd).toBe(2418.66);
+    expect(q.confidenceUsd).toBeCloseTo(0.035, 9);
+    expect(q.publishedAt.toISOString()).toBe("2026-11-04T15:56:44.711Z");
+    expect(q.source).toBe("coinbase-ticker");
+  });
+  it("passe le contrôle qualité quand le prix est frais et le carnet serré", async () => {
+    const now = new Date();
+    const body = { ...REAL, time: now.toISOString() };
+    await expect(getCheckedPrice(new CoinbaseSource(serve(body)), "ETH")).resolves.toMatchObject({ priceUsd: 2418.66 });
+  });
+  it("refuse un prix périmé", async () => {
+    await expect(getCheckedPrice(new CoinbaseSource(serve(REAL)), "ETH")).rejects.toThrow(/périmé/);
+  });
+  it("refuse un carnet trop large (prix peu fiable)", async () => {
+    const body = { ...REAL, time: new Date().toISOString(), bid: "2000", ask: "2800", price: "2400" };
+    await expect(getCheckedPrice(new CoinbaseSource(serve(body)), "ETH")).rejects.toThrow(/incertain/);
+  });
+  it("refuse un carnet croisé", async () => {
+    await expect(new CoinbaseSource(serve({ ...REAL, bid: "2500" })).getPrice("ETH")).rejects.toThrow(/croisé/);
+  });
+  it("signale une réponse inattendue", async () => {
+    for (const body of [{}, { ...REAL, price: "abc" }, { ...REAL, time: "hier" }, { ...REAL, ask: undefined }]) {
+      await expect(new CoinbaseSource(serve(body)).getPrice("ETH")).rejects.toThrow(/inattendue/);
+    }
+  });
+  it("remonte l'erreur HTTP avec le message du serveur", async () => {
+    await expect(new CoinbaseSource(serve({ message: "NotFound" }, 404)).getPrice("ZZZ")).rejects.toThrow(/HTTP 404 sur ZZZ-USD.*NotFound/);
+  });
+  it("valide le symbole avant toute requête", async () => {
+    const calls: string[] = [];
+    await expect(new CoinbaseSource(serve(REAL, 200, calls)).getPrice("ETH/../x")).rejects.toThrow(/invalide/);
+    expect(calls).toHaveLength(0);
+  });
+});
+
+describe("PythSource : authentification", () => {
+  it("explique clairement le 401 et propose l'alternative", async () => {
+    const f = (async (u: string) =>
+      u.includes("/v2/price_feeds")
+        ? ({ ok: true, status: 200, json: async () => [{ id: "aa", attributes: { symbol: "Crypto.ETH/USD" } }] } as Response)
+        : ({ ok: false, status: 401, json: async () => ({}) } as Response)) as unknown as typeof fetch;
+    await expect(new PythSource(f).getPrice("ETH")).rejects.toThrow(/401.*authentification.*CoinbaseSource/);
   });
 });

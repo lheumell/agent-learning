@@ -10,7 +10,7 @@ import { backtestCommand } from "./backtest-cli.js";
 import { historyCommand } from "./history-cli.js";
 import { paperCommand } from "./paper-cli.js";
 import { walkforwardCommand } from "./walkforward-cli.js";
-import { PythSource, getCheckedPrice } from "./prices.js";
+import { CoinbaseSource, getCheckedPrice } from "./prices.js";
 import { createWallet } from "./wallet.js";
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -50,7 +50,7 @@ async function main() {
 
   if (cmd === "price") {
     const symbol = rest[0] ?? "ETH";
-    const q = await getCheckedPrice(new PythSource(), symbol);
+    const q = await getCheckedPrice(new CoinbaseSource(), symbol);
     console.log(`${q.symbol}/USD = ${q.priceUsd.toFixed(2)} (±${q.confidenceUsd.toFixed(2)}) publié ${q.publishedAt.toISOString()} [${q.source}]`);
     return;
   }

@@ -52,12 +52,62 @@ export function assertQuality(q: PriceQuote, limits: QualityLimits, now = new Da
 type FetchFn = typeof fetch;
 
 /**
- * Prix via Pyth Hermes (API publique, sans clé).
+ * Prix via le ticker public de Coinbase Exchange (sans clé) : GET /products/ETH-USD/ticker
+ *   -> {"price":"2418.66","bid":"2418.65","ask":"2418.72","time":"2026-11-04T15:56:44.711134654Z",...}
+ * Format validé sur une vraie réponse.
+ * `confidenceUsd` = demi-écart bid/ask : un carnet très large signale un prix peu fiable,
+ * et le contrôle qualité (maxConfidenceRatio) le refuse alors.
+ * `publishedAt` = heure du dernier échange : sur un produit peu liquide, un prix vieux sera refusé comme périmé.
+ */
+export class CoinbaseSource implements PriceSource {
+  constructor(
+    private fetchFn: FetchFn = (...a) => fetch(...a),
+    private baseUrl = "https://api.exchange.coinbase.com",
+    private quote = "USD",
+  ) {}
+
+  async getPrice(rawSymbol: string): Promise<PriceQuote> {
+    const symbol = normalizeSymbol(rawSymbol);
+    const product = `${symbol}-${this.quote}`;
+    const res = await this.fetchFn(`${this.baseUrl}/products/${product}/ticker`, {
+      headers: { "User-Agent": "agent-learning", Accept: "application/json" },
+    });
+    if (!res.ok) {
+      let detail = "";
+      try {
+        detail = ` — ${JSON.stringify(await res.json()).slice(0, 150)}`;
+      } catch {
+        /* pas de corps JSON */
+      }
+      throw new Error(`Coinbase HTTP ${res.status} sur ${product}${detail}`);
+    }
+    const t: any = await res.json();
+    const price = Number(t?.price);
+    const bid = Number(t?.bid);
+    const ask = Number(t?.ask);
+    // Date.parse tolère mal les fractions de seconde au-delà de la milliseconde : on tronque à 3 chiffres.
+    const when = typeof t?.time === "string" ? Date.parse(t.time.replace(/(\.\d{3})\d+/, "$1")) : NaN;
+    if (![price, bid, ask, when].every(Number.isFinite)) throw new Error(`réponse Coinbase inattendue pour ${product}`);
+    if (bid > ask) throw new Error(`${product} : carnet croisé (bid ${bid} > ask ${ask}), prix non fiable`);
+    return {
+      symbol,
+      priceUsd: price,
+      confidenceUsd: (ask - bid) / 2,
+      publishedAt: new Date(when),
+      source: "coinbase-ticker",
+    };
+  }
+}
+
+/**
+ * Prix via Pyth Hermes.
+ * ⚠ Depuis novembre 2026, /v2/updates/price/latest répond 401 sans authentification
+ * (seule la liste des flux est publique). Conservé pour une utilisation avec accès, non utilisé par défaut.
  * Les identifiants de flux sont résolus à l'exécution (pas codés en dur) :
  * on cherche le flux dont attributes.symbol vaut exactement « Crypto.SYMBOL/USD ».
  *
- * Format de /v2/price_feeds validé sur une vraie réponse (fournie par l'utilisateur).
- * Le format de /v2/updates/price/latest (parsed[0].price) reste à confirmer en réel.
+ * Format de /v2/price_feeds validé sur une vraie réponse. Le format de /v2/updates/price/latest
+ * (parsed[0].price) n'a jamais pu être confirmé en réel (401).
  */
 export class PythSource implements PriceSource {
   private feedIds = new Map<string, string>();
@@ -69,6 +119,12 @@ export class PythSource implements PriceSource {
 
   private async getJson(url: string): Promise<any> {
     const res = await this.fetchFn(url);
+    if (res.status === 401) {
+      throw new Error(
+        `Pyth HTTP 401 sur ${new URL(url).pathname} : l'API publique exige maintenant une authentification pour les prix. ` +
+          `Utilisez CoinbaseSource (par défaut).`,
+      );
+    }
     if (!res.ok) throw new Error(`Pyth HTTP ${res.status} sur ${new URL(url).pathname}`);
     return res.json();
   }
