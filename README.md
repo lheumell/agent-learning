@@ -160,6 +160,43 @@ npm run walkforward -- --csv prix.csv --train 500 --test 250
 Conventions : chaque fenêtre de test repart sans position ; la stratégie reçoit `slow` barres d'échauffement *avant* la fenêtre (passé uniquement) pour ne pas perdre son début.
 La comparaison entraînement/test est ramenée à « pour 100 barres », car les fenêtres n'ont pas la même longueur.
 
+## Le test sait-il distinguer un vrai avantage du bruit ? (cas témoins)
+
+Un test qui répond toujours « non » ne prouve rien. On vérifie donc qu'il répond « oui » quand un avantage existe vraiment.
+Le générateur `--model ou` simule des prix rappelés vers une moyenne (Ornstein-Uhlenbeck) : le retour à la moyenne y est réel, par construction.
+La stratégie `zrev` (achat quand le prix est anormalement bas, vente au retour vers la moyenne) est testée sur les deux types de marché, 200 séries chacun :
+
+| Marché simulé | Entraînement (par 100 barres) | Test, données neuves (par 100 barres) | Composé sur les tests | Acheter-garder |
+|---|---|---|---|---|
+| **Avec avantage réel** (`--model ou`) | +4,94 % | **+3,24 %** | **+60,6 %** | −1,3 % |
+| **Sans avantage** (marche aléatoire) | +2,44 % | **−0,52 %** | −8,2 % | −1,4 % |
+
+- Avec un vrai avantage, il **survit** aux données neuves (+3,24 %). Sans avantage, il **s'évapore** (+2,44 % → −0,52 %). Le test discrimine donc bien.
+- Quand l'avantage est réel, il résiste aux frais ; quand il n'y en a pas, les frais l'achèvent :
+
+| Frais par transaction | `zrev` sur marché avec avantage | `sma` sur marche aléatoire |
+|---|---|---|
+| 0 % | +72,2 % | −3,5 % |
+| 0,1 % | +63,6 % | −9,4 % |
+| 0,3 % | +51,2 % | −14,1 % |
+| 0,6 % | +38,4 % | −19,9 % |
+
+(rendement composé sur les fenêtres de test, médiane de 100 séries ; commande : `npm run walkforward -- --seeds 100 --fee-sweep`, avec `--strategy zrev --model ou` pour la première colonne)
+
+**À retenir :** si une stratégie ne montre pas, sur vos vrais prix, un rendement de test positif et proche de celui de l'entraînement, y compris avec 0,3 à 0,6 % de frais, c'est qu'il n'y a pas d'avantage exploitable. Ces séries sont simulées : un marché réel peut revenir à la moyenne sur certaines échelles de temps, et c'est justement ce que `--csv` permet de vérifier.
+
+### La période réservée (`--holdout`, `npm run holdout`)
+
+Chaque stratégie ou paramètre essayé sur les mêmes données augmente la chance de trouver un faux positif. Pour garder un juge impartial :
+
+```bash
+npm run walkforward -- --csv data/history/FICHIER.csv --strategy zrev --holdout 0.2   # tout le travail se fait sur les 80 % premiers
+npm run holdout -- --csv data/history/FICHIER.csv --pct 0.2 --strategy zrev --window 50 --entry 2 --exit 0   # UNE évaluation finale
+```
+
+Les 20 % finaux ne sont jamais utilisés par le walk-forward. La commande `holdout` évalue **une** stratégie aux paramètres que vous avez déjà figés, et compte vos regards (`data/holdout-log.json`) :
+au deuxième regard, elle vous avertit que la période n'est plus indépendante si vous avez modifié vos choix entre-temps.
+
 ## Mode papier (`src/paper.ts`)
 
 Même stratégie, **vrais prix (Coinbase Exchange)**, **argent fictif**. Aucune transaction, aucun wallet : ça ne peut rien dépenser.
@@ -200,6 +237,7 @@ Les tests tournent **hors ligne** et n'ont besoin d'aucun secret : n'ajoutez jam
 | Commande | Rôle |
 |---|---|
 | `npm run wallet` | génère/affiche le wallet de test |
+| `npm run holdout -- --csv fichier.csv` | évalue UNE stratégie figée sur la fin des données mise de côté (chaque regard est compté) |
 | `npm run history -- --days 90` | télécharge des bougies historiques (Coinbase Exchange, sans clé) en CSV |
 | `npm run walkforward -- --seeds 300` | test walk-forward : paramètres choisis sur le passé, jugés sur des données jamais vues |
 | `npm run paper -- --ticks 5 --interval 10` | mode papier : prix réels, argent fictif (`status` pour l'état, Ctrl+C pour arrêter) |
@@ -220,6 +258,8 @@ Les tests tournent **hors ligne** et n'ont besoin d'aucun secret : n'ajoutez jam
 | `src/config.ts` | lecture des limites depuis `.env` |
 | `src/strategy.ts` | stratégie de croisement de moyennes mobiles (SMA), pure et sans effet de bord |
 | `src/portfolio.ts` | le code d'exécution (achat, vente, frais, slippage), partagé par le backtest et le mode papier |
+| `src/strategies.ts` | choix de la stratégie en ligne de commande (`sma`, `zrev`) |
+| `src/holdout.ts` | période réservée : découpe de la fin des données et compteur de regards |
 | `src/history.ts` | import de bougies historiques : pagination, nouvelles tentatives, contrôle des trous |
 | `src/walkforward.ts` | walk-forward : optimisation sur une fenêtre, évaluation sur la suivante, sans fuite du futur |
 | `src/paper.ts` | trader papier : prix en direct, état sauvegardé, reprise après redémarrage, journal |

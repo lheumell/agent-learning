@@ -20,17 +20,37 @@ export interface SyntheticOptions {
   drift?: number;
   /** Volatilité par barre (ex. 0.01 = 1 %). */
   vol?: number;
+  /**
+   * "gbm" : marche aléatoire (aucun avantage possible, cas témoin négatif).
+   * "ou"  : Ornstein-Uhlenbeck sur le log-prix, le prix est rappelé vers `start` (cas témoin positif :
+   *         un avantage réel EXISTE, un bon test doit le détecter). `drift` est ignoré dans ce modèle.
+   */
+  model?: "gbm" | "ou";
+  /** Force de rappel par barre pour "ou" (0.05 = demi-vie d'environ 14 barres). */
+  theta?: number;
 }
 
 /** Mouvement brownien géométrique : les prix restent strictement positifs. */
 export function syntheticPrices(o: SyntheticOptions): number[] {
-  const { n, seed, start = 100, drift = 0, vol = 0.01 } = o;
+  const { n, seed, start = 100, drift = 0, vol = 0.01, model = "gbm", theta = 0.05 } = o;
   if (!Number.isInteger(n) || n < 2) throw new Error("n doit être un entier >= 2");
+  if (model !== "gbm" && model !== "ou") throw new Error(`modèle inconnu : ${model} (gbm | ou)`);
+  if (!(theta > 0 && theta <= 1)) throw new Error("theta doit être dans ]0, 1]");
   const rnd = mulberry32(seed);
   const normal = () => {
     const u = Math.max(rnd(), 1e-12);
     return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rnd());
   };
+  if (model === "ou") {
+    const mu = Math.log(start);
+    let x = mu;
+    const out = [start];
+    for (let i = 1; i < n; i++) {
+      x = x + theta * (mu - x) + vol * normal();
+      out.push(Math.exp(x));
+    }
+    return out;
+  }
   const out = [start];
   for (let i = 1; i < n; i++) {
     out.push(out[i - 1] * Math.exp(drift - (vol * vol) / 2 + vol * normal()));

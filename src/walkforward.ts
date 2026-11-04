@@ -1,13 +1,50 @@
 import { runBacktest } from "./backtest.js";
 import { DEFAULT_EXECUTION, buyAndHoldEquity, type ExecutionConfig } from "./portfolio.js";
-import { SmaCrossover } from "./strategy.js";
+import { SmaCrossover, ZScoreReversion, type Strategy } from "./strategy.js";
 
 export interface ParamSet {
   fast: number;
   slow: number;
 }
 
-export interface WalkForwardConfig {
+/** Décrit une famille de stratégies pour le walk-forward. */
+export interface StrategySpec<P> {
+  make: (p: P) => Strategy;
+  /** Barres d'échauffement nécessaires avant la première décision. */
+  warmup: (p: P) => number;
+  label: (p: P) => string;
+}
+
+export const SMA_SPEC: StrategySpec<ParamSet> = {
+  make: (p) => new SmaCrossover(p.fast, p.slow),
+  warmup: (p) => p.slow,
+  label: (p) => `SMA ${p.fast}/${p.slow}`,
+};
+
+export interface ZrevParams {
+  window: number;
+  entryZ: number;
+  exitZ: number;
+}
+
+export const ZREV_SPEC: StrategySpec<ZrevParams> = {
+  make: (p) => new ZScoreReversion(p.window, p.entryZ, p.exitZ),
+  warmup: (p) => p.window,
+  label: (p) => `ZREV ${p.window}/${p.entryZ}/${p.exitZ}`,
+};
+
+export const ZREV_GRID: ZrevParams[] = (() => {
+  const out: ZrevParams[] = [];
+  for (const window of [20, 50, 100]) {
+    for (const entryZ of [1, 1.5, 2, 2.5]) {
+      for (const exitZ of [-0.5, 0, 0.5]) out.push({ window, entryZ, exitZ });
+    }
+  }
+  return out;
+})();
+export const ZREV_FIXED: ZrevParams = { window: 50, entryZ: 2, exitZ: 0 };
+
+export interface WalkForwardConfig<P = ParamSet> {
   /** Barres utilisées pour choisir les paramètres. */
   trainBars: number;
   /** Barres de test, jamais vues pendant le choix. */
@@ -15,18 +52,20 @@ export interface WalkForwardConfig {
   /** Décalage entre deux fenêtres (défaut : testBars, donc des tests contigus sans recouvrement). */
   stepBars?: number;
   /** Paramètres candidats. */
-  grid: ParamSet[];
-  /** Paramètres fixes de référence (défaut 10/30) : l'optimisation fait-elle mieux que ne rien optimiser ? */
-  fixed?: ParamSet;
+  grid: P[];
+  /** Paramètres fixes de référence (SMA : 10/30 par défaut) : l'optimisation fait-elle mieux que ne rien optimiser ? */
+  fixed?: P;
+  /** Famille de stratégies (défaut : croisement de moyennes mobiles). */
+  spec?: StrategySpec<P>;
   exec?: Partial<ExecutionConfig>;
 }
 
-export interface Fold {
+export interface Fold<P = ParamSet> {
   index: number;
   trainStart: number;
   testStart: number;
   testEnd: number;
-  params: ParamSet;
+  params: P;
   /** Rendement sur la fenêtre d'entraînement avec les paramètres retenus (flatteur par construction). */
   isReturnPct: number;
   /** Rendement sur la fenêtre de test. C'est le seul chiffre qui compte. */
@@ -37,8 +76,8 @@ export interface Fold {
   oosTrades: number;
 }
 
-export interface WalkForwardResult {
-  folds: Fold[];
+export interface WalkForwardResult<P = ParamSet> {
+  folds: Fold<P>[];
   /** Rendements de test enchaînés (composés). */
   oosCompoundedPct: number;
   oosBuyHoldCompoundedPct: number;
@@ -64,10 +103,17 @@ export function per100(returnPct: number, bars: number): number {
   return ((1 + returnPct / 100) ** (100 / bars) - 1) * 100;
 }
 
-function validate(prices: number[], c: WalkForwardConfig) {
+function resolve<P>(c: WalkForwardConfig<P>): { spec: StrategySpec<P>; fixed: P } {
+  const spec = (c.spec ?? (SMA_SPEC as unknown as StrategySpec<P>));
+  const fixed = c.fixed ?? (c.spec ? undefined : (DEFAULT_FIXED as unknown as P));
+  if (fixed === undefined) throw new Error("fixed est obligatoire avec une stratégie personnalisée");
+  return { spec, fixed };
+}
+
+function validate<P>(prices: number[], c: WalkForwardConfig<P>, spec: StrategySpec<P>, fixed: P) {
   if (!c.grid.length) throw new Error("grille de paramètres vide");
-  const maxSlow = Math.max(...c.grid.map((g) => g.slow), (c.fixed ?? DEFAULT_FIXED).slow);
-  if (c.trainBars < maxSlow + 50) throw new Error(`trainBars trop court : minimum ${maxSlow + 50} (plus grande fenêtre lente + 50)`);
+  const maxWarm = Math.max(...c.grid.map(spec.warmup), spec.warmup(fixed));
+  if (c.trainBars < maxWarm + 50) throw new Error(`trainBars trop court : minimum ${maxWarm + 50} (plus grand échauffement + 50)`);
   if (c.testBars < 30) throw new Error("testBars trop court : minimum 30");
   if ((c.stepBars ?? c.testBars) < 1) throw new Error("stepBars doit être >= 1");
   if (prices.length < c.trainBars + c.testBars) {
@@ -76,26 +122,40 @@ function validate(prices: number[], c: WalkForwardConfig) {
 }
 
 /**
- * Évalue des paramètres sur [from, to). La stratégie reçoit `slow` barres d'échauffement AVANT `from`
+ * Évalue des paramètres sur [from, to). La stratégie reçoit `warmup` barres d'échauffement AVANT `from`
  * (passé uniquement) sans pouvoir trader pendant l'échauffement, pour ne pas perdre le début de la fenêtre.
  * Le capital repart à zéro position à chaque fenêtre : les fenêtres sont indépendantes.
  */
-function evaluate(prices: number[], from: number, to: number, p: ParamSet, exec: Partial<ExecutionConfig>) {
-  const start = Math.max(0, from - p.slow);
-  const r = runBacktest(prices.slice(start, to), new SmaCrossover(p.fast, p.slow), exec);
-  return { returnPct: r.returnPct, trades: r.trades.length };
+export function evaluateSegment(
+  prices: number[],
+  from: number,
+  to: number,
+  make: () => Strategy,
+  warmup: number,
+  exec: Partial<ExecutionConfig> = {},
+) {
+  const start = Math.max(0, from - warmup);
+  const r = runBacktest(prices.slice(start, to), make(), exec);
+  const cfg = { ...DEFAULT_EXECUTION, ...exec };
+  const bh = (buyAndHoldEquity(prices[from], prices[to - 1], cfg) / cfg.initialCashUsd - 1) * 100;
+  return { returnPct: r.returnPct, trades: r.trades.length, buyHoldPct: bh, maxDrawdownPct: r.maxDrawdownPct, feesPaid: r.feesPaid };
+}
+
+function evaluate<P>(prices: number[], from: number, to: number, p: P, spec: StrategySpec<P>, exec: Partial<ExecutionConfig>) {
+  const r = evaluateSegment(prices, from, to, () => spec.make(p), spec.warmup(p), exec);
+  return { returnPct: r.returnPct, trades: r.trades };
 }
 
 const compound = (rs: number[]) => (rs.reduce((acc, r) => acc * (1 + r / 100), 1) - 1) * 100;
 const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
 
-export function walkForward(prices: number[], config: WalkForwardConfig): WalkForwardResult {
-  validate(prices, config);
+export function walkForward<P = ParamSet>(prices: number[], config: WalkForwardConfig<P>): WalkForwardResult<P> {
+  const { spec, fixed } = resolve(config);
+  validate(prices, config, spec, fixed);
   const exec = config.exec ?? {};
   const cfg = { ...DEFAULT_EXECUTION, ...exec };
   const step = config.stepBars ?? config.testBars;
-  const fixed = config.fixed ?? DEFAULT_FIXED;
-  const folds: Fold[] = [];
+  const folds: Fold<P>[] = [];
 
   for (let s = 0; s + config.trainBars + config.testBars <= prices.length; s += step) {
     const testStart = s + config.trainBars;
@@ -105,15 +165,15 @@ export function walkForward(prices: number[], config: WalkForwardConfig): WalkFo
     let best = config.grid[0];
     let bestRet = -Infinity;
     for (const p of config.grid) {
-      const ret = runBacktest(prices.slice(s, testStart), new SmaCrossover(p.fast, p.slow), exec).returnPct;
+      const ret = runBacktest(prices.slice(s, testStart), spec.make(p), exec).returnPct;
       if (ret > bestRet) {
         bestRet = ret;
         best = p;
       }
     }
 
-    const oos = evaluate(prices, testStart, testEnd, best, exec);
-    const fix = evaluate(prices, testStart, testEnd, fixed, exec);
+    const oos = evaluate(prices, testStart, testEnd, best, spec, exec);
+    const fix = evaluate(prices, testStart, testEnd, fixed, spec, exec);
     const bh = (buyAndHoldEquity(prices[testStart], prices[testEnd - 1], cfg) / cfg.initialCashUsd - 1) * 100;
 
     folds.push({

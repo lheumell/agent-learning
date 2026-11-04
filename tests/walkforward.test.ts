@@ -117,7 +117,7 @@ describe("walkforwardCommand", () => {
   });
   it("agrège plusieurs séries", () => {
     const txt = run(["--seeds", "5"]);
-    expect(txt).toMatch(/5 séries simulées/);
+    expect(txt).toMatch(/5 série\(s\) simulée\(s\)/);
     expect(txt).toMatch(/jamais vues/);
   });
   it("affiche l'aide et rejette les mauvais arguments", () => {

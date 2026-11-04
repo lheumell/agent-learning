@@ -13,7 +13,8 @@
     "backtest": "tsx src/index.ts backtest",
     "paper": "tsx src/index.ts paper",
     "walkforward": "tsx src/index.ts walkforward",
-    "history": "tsx src/index.ts history"
+    "history": "tsx src/index.ts history",
+    "holdout": "tsx src/index.ts holdout"
   },
   "keywords": [],
   "author": "",

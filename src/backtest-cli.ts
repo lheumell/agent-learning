@@ -1,7 +1,7 @@
 import { runBacktest, type BacktestResult } from "./backtest.js";
 import { parseFlags } from "./cli-utils.js";
 import { loadCsvPrices, syntheticPrices } from "./simulate.js";
-import { SmaCrossover } from "./strategy.js";
+import { parseStrategyName, strategyFromFlags } from "./strategies.js";
 
 const median = (xs: number[]) => {
   const s = [...xs].sort((a, b) => a - b);
@@ -14,7 +14,10 @@ export const BACKTEST_USAGE = `Usage : npm run backtest -- [options]
   --csv fichier.csv     prix réels (colonne "close" ou dernière colonne)
   --seeds N             N séries simulées (défaut 1)   --n 1000  barres par série
   --drift 0  --vol 0.01 paramètres de la simulation (par barre)
-  --fast 10  --slow 30  fenêtres de la moyenne mobile
+  --strategy sma|zrev   famille de stratégie (défaut sma)
+  --fast 10  --slow 30  (sma) fenêtres de la moyenne mobile
+  --window 50 --entry 2 --exit 0   (zrev) fenêtre, seuil d'entrée et de sortie en z-score
+  --model gbm|ou        simulation : marche aléatoire ou retour à la moyenne (--theta 0.05)
   --fee 0.001  --slippage 0.0005`;
 
 export function backtestCommand(args: string[], log: (s: string) => void = console.log) {
@@ -25,10 +28,11 @@ export function backtestCommand(args: string[], log: (s: string) => void = conso
     if (!Number.isFinite(v)) throw new Error(`--${k} doit être un nombre`);
     return v;
   };
-  const fast = num("fast", 10);
-  const slow = num("slow", 30);
   const cfg = { feeRate: num("fee", 0.001), slippageRate: num("slippage", 0.0005) };
-  const mk = () => new SmaCrossover(fast, slow);
+  const mk = strategyFromFlags(parseStrategyName(f.strategy), num).make;
+  const model = f.model === undefined ? "gbm" : f.model;
+  if (model !== "gbm" && model !== "ou") throw new Error(`--model : gbm | ou (reçu "${model}")`);
+  const theta = num("theta", 0.05);
 
   if (f.csv) {
     const r = runBacktest(loadCsvPrices(f.csv), mk(), cfg);
@@ -41,7 +45,7 @@ export function backtestCommand(args: string[], log: (s: string) => void = conso
   const vol = num("vol", 0.01);
   const results: BacktestResult[] = [];
   for (let seed = 1; seed <= seeds; seed++) {
-    results.push(runBacktest(syntheticPrices({ n, seed, drift, vol }), mk(), cfg));
+    results.push(runBacktest(syntheticPrices({ n, seed, drift, vol, model, theta }), mk(), cfg));
   }
 
   if (seeds === 1) return log(formatSingle(results[0]) + `\n(série simulée seed=1, n=${n}, drift=${drift}, vol=${vol})`);
