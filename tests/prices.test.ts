@@ -39,9 +39,17 @@ describe("assertQuality", () => {
 });
 
 describe("PythSource (réponses simulées)", () => {
+  // Extraits d'une vraie réponse de Hermes pour ?query=eth&asset_type=crypto (pas de champ `base`).
+  const feed = (id: string, symbol: string, quote: string) => ({
+    id,
+    market_hours: { is_open: true, next_open: null, next_close: null },
+    attributes: { asset_type: "Crypto", quote_currency: quote, symbol, display_symbol: symbol.replace(/[./]/g, "").replace("Crypto", "") },
+  });
   const feeds = [
-    { id: "aaaa", attributes: { base: "WETH", quote_currency: "USD" } },
-    { id: "0xbbbb", attributes: { base: "ETH", quote_currency: "USD" } },
+    feed("ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace", "Crypto.ETH/USD", "USD"),
+    feed("b27578a9654246cb0a2950842b92330e9ace141c52b63829cc72d5c45a5a595a", "Crypto.ETHFI/USD", "USD"),
+    feed("15ecddd26d49e1a8f1de9376ebebc03916ede873447c1255d2d5891b92ce5717", "Crypto.CBETH/USD", "USD"),
+    feed("c96458d393fe9deb7a7d63a0ac41e2898a67a7750dbd166673279e06c868df0a", "Crypto.ETH/BTC", "BTC"),
   ];
   const latest = { parsed: [{ price: { price: "300012345678", conf: "150000000", expo: -8, publish_time: 1767268800 } }] };
 
@@ -56,7 +64,7 @@ describe("PythSource (réponses simulées)", () => {
   it("choisit le flux exact ETH/USD et applique l'exposant", async () => {
     const calls: string[] = [];
     const q = await new PythSource(fakeFetch(calls)).getPrice("eth");
-    expect(calls[1]).toContain("ids[]=bbbb"); // flux ETH, pas WETH, sans préfixe 0x
+    expect(calls[1]).toContain("ids[]=ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace"); // ETH/USD, pas ETHFI, CBETH ni ETH/BTC
     expect(q.priceUsd).toBeCloseTo(3000.12345678, 6);
     expect(q.confidenceUsd).toBeCloseTo(1.5, 6);
     expect(q.publishedAt.toISOString()).toBe("2026-01-01T12:00:00.000Z");
@@ -68,9 +76,20 @@ describe("PythSource (réponses simulées)", () => {
     await src.getPrice("ETH");
     expect(calls.filter((c) => c.includes("/v2/price_feeds"))).toHaveLength(1);
   });
-  it("échoue clairement si le flux n'existe pas", async () => {
-    const f = (async () => ({ ok: true, status: 200, json: async () => [] }) as Response) as unknown as typeof fetch;
-    await expect(new PythSource(f).getPrice("ZZZ")).rejects.toThrow(/aucun flux/);
+  it("échoue clairement si le flux n'existe pas, en listant ce qui a été reçu", async () => {
+    const f = (async () => ({ ok: true, status: 200, json: async () => feeds }) as Response) as unknown as typeof fetch;
+    await expect(new PythSource(f).getPrice("ZZZ")).rejects.toThrow(/Crypto\.ZZZ\/USD.*4 flux reçus.*Crypto\.ETH\/USD/);
+  });
+  it("signale une réponse vide ou inattendue", async () => {
+    for (const body of [[], { error: "x" }]) {
+      const f = (async () => ({ ok: true, status: 200, json: async () => body }) as Response) as unknown as typeof fetch;
+      await expect(new PythSource(f).getPrice("ETH")).rejects.toThrow(/aucun flux.*(vide|inattendue)/);
+    }
+  });
+  it("ne confond pas ETH avec ETHFI, CBETH ni ETH/BTC", async () => {
+    const only = feeds.filter((f) => f.attributes.symbol !== "Crypto.ETH/USD");
+    const f = (async () => ({ ok: true, status: 200, json: async () => only }) as Response) as unknown as typeof fetch;
+    await expect(new PythSource(f).getPrice("ETH")).rejects.toThrow(/aucun flux/);
   });
   it("échoue clairement sur une réponse inattendue", async () => {
     const f = (async (u: string) =>

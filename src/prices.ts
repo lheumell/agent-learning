@@ -54,11 +54,10 @@ type FetchFn = typeof fetch;
 /**
  * Prix via Pyth Hermes (API publique, sans clé).
  * Les identifiants de flux sont résolus à l'exécution (pas codés en dur) :
- * on cherche le flux Crypto « SYMBOL/USD » exact.
+ * on cherche le flux dont attributes.symbol vaut exactement « Crypto.SYMBOL/USD ».
  *
- * ⚠ Écrit à partir de la documentation et de la mémoire de l'API : testé avec
- * des réponses simulées, PAS contre l'API réelle (réseau bloqué lors de l'écriture).
- * Lancez `npm run price -- ETH` chez vous pour valider.
+ * Format de /v2/price_feeds validé sur une vraie réponse (fournie par l'utilisateur).
+ * Le format de /v2/updates/price/latest (parsed[0].price) reste à confirmer en réel.
  */
 export class PythSource implements PriceSource {
   private feedIds = new Map<string, string>();
@@ -80,15 +79,20 @@ export class PythSource implements PriceSource {
     const feeds = await this.getJson(
       `${this.baseUrl}/v2/price_feeds?query=${encodeURIComponent(symbol)}&asset_type=crypto`,
     );
-    const match = Array.isArray(feeds)
-      ? feeds.find(
-          (f: any) =>
-            f?.attributes?.base === symbol &&
-            f?.attributes?.quote_currency === "USD" &&
-            typeof f?.id === "string",
-        )
-      : undefined;
-    if (!match) throw new Error(`aucun flux Pyth ${symbol}/USD trouvé`);
+    // Format réel de Hermes : attributes.symbol = "Crypto.ETH/USD" (il n'y a pas de champ `base`).
+    // La recherche « eth » renvoie aussi ETHFI/USD, CBETH/USD, ETH/BTC… : il faut une égalité exacte.
+    const wanted = `Crypto.${symbol}/USD`;
+    const list: any[] = Array.isArray(feeds) ? feeds : [];
+    const match = list.find(
+      (f) => typeof f?.id === "string" && String(f?.attributes?.symbol ?? "").toUpperCase() === wanted.toUpperCase(),
+    );
+    if (!match) {
+      const seen = list.slice(0, 5).map((f) => f?.attributes?.symbol ?? "?").join(", ");
+      throw new Error(
+        `aucun flux Pyth ${wanted} trouvé` +
+          (list.length ? ` (${list.length} flux reçus, par ex. : ${seen})` : " (réponse vide ou inattendue)"),
+      );
+    }
     const id = match.id.startsWith("0x") ? match.id.slice(2) : match.id;
     this.feedIds.set(symbol, id);
     return id;
