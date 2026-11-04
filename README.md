@@ -100,6 +100,24 @@ Ce qu'il faut en retenir :
 ⚠ Les prix simulés n'ont ni tendances réelles, ni chocs, ni cycles de volatilité. Pour juger sur du réel, fournissez un CSV d'historique (`--csv`).
 La stratégie **n'est pas branchée** au wallet ni à l'agent : c'est volontaire. Le branchement viendra après, via le garde-fou.
 
+## Mode papier (`src/paper.ts`)
+
+Même stratégie, **vrais prix Pyth**, **argent fictif**. Aucune transaction, aucun wallet : ça ne peut rien dépenser.
+
+```bash
+npm run paper -- --ticks 5 --interval 10     # essai rapide : 5 prix, un toutes les 10 s
+npm run paper                                # ETH, un prix par minute, jusqu'à Ctrl+C
+npm run paper -- status                      # état, sans rien lancer
+npm run paper -- --symbol BTC --fast 5 --slow 20
+```
+
+- **Délai avant le premier signal :** SMA 10/30 demande 30 prix. À un prix par minute, comptez 30 minutes avant qu'un signal puisse apparaître, puis des heures ou des jours avant d'avoir assez d'allers-retours pour juger quoi que ce soit.
+- **Même moteur que le backtest :** même `Portfolio`, mêmes frais, même règle « signal à la barre *i*, exécution à la barre *i+1* ». Un test vérifie que le mode papier et le backtest donnent **exactement** le même résultat sur la même série de prix.
+- **Un prix refusé ne compte pas :** prix périmé, trop incertain ou erreur réseau → le tick est sauté et **n'alimente pas la stratégie** (un faux prix créerait un faux signal). Après 10 ticks sautés d'affilée, l'arrêt est automatique.
+- **Reprise après arrêt :** l'état est dans `data/paper-<SYMBOL>.json` (écriture atomique). Relancer continue là où on s'était arrêté. Si vous changez le symbole, la stratégie ou les frais, la commande refuse de mélanger les résultats : utilisez `--reset`.
+- **Journal :** `data/paper-<SYMBOL>.jsonl` contient chaque prix reçu, chaque signal, chaque trade et chaque tick sauté. `data/STOP` arrête aussi le mode papier.
+- ⚠ **Jamais testé contre l'API Pyth réelle** (bloquée dans l'environnement de développement). Sans réseau, la commande saute proprement les ticks. Le premier vrai essai est chez vous.
+
 ## Limites à connaître
 
 - **Le garde-fou ne couvre que `sendTransaction`.** Signer un message (`signMessage`, `signTypedData`) n'est pas bloqué, or certains protocoles autorisent des paiements par signature (permits ERC-20, x402). N'ajoutez pas ces providers sans étendre `Guard`.
@@ -117,6 +135,7 @@ Pas dans ce projet : la chain est codée en dur sur Base Sepolia et le garde-fou
 | Commande | Rôle |
 |---|---|
 | `npm run wallet` | génère/affiche le wallet de test |
+| `npm run paper -- --ticks 5 --interval 10` | mode papier : prix réels, argent fictif (`status` pour l'état, Ctrl+C pour arrêter) |
 | `npm run backtest -- --seeds 300` | teste la stratégie sur des séries simulées (ou `--csv` pour de vrais prix) |
 | `npm run price -- ETH` | affiche le prix (Pyth) après contrôle de qualité |
 | `npm run agent -- "…"` | lance l'agent avec une instruction |
@@ -133,6 +152,8 @@ Pas dans ce projet : la chain est codée en dur sur Base Sepolia et le garde-fou
 | `src/agent.ts` | la boucle agent : Claude ↔ outils |
 | `src/config.ts` | lecture des limites depuis `.env` |
 | `src/strategy.ts` | stratégie de croisement de moyennes mobiles (SMA), pure et sans effet de bord |
+| `src/portfolio.ts` | le code d'exécution (achat, vente, frais, slippage), partagé par le backtest et le mode papier |
+| `src/paper.ts` | trader papier : prix en direct, état sauvegardé, reprise après redémarrage, journal |
 | `src/backtest.ts` | simulateur : frais, slippage, exécution à la barre suivante, comparaison à « acheter-garder » |
 | `src/simulate.ts` | prix simulés reproductibles (graine) + lecture de CSV |
 | `src/prices.ts` | source de prix Pyth + contrôle de qualité + outil `get_price` |

@@ -10,7 +10,8 @@
     "audit": "tsx src/index.ts audit",
     "typecheck": "tsc",
     "price": "tsx src/index.ts price",
-    "backtest": "tsx src/index.ts backtest"
+    "backtest": "tsx src/index.ts backtest",
+    "paper": "tsx src/index.ts paper"
   },
   "keywords": [],
   "author": "",

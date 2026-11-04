@@ -1,19 +1,7 @@
 import { runBacktest, type BacktestResult } from "./backtest.js";
+import { parseFlags } from "./cli-utils.js";
 import { loadCsvPrices, syntheticPrices } from "./simulate.js";
 import { SmaCrossover } from "./strategy.js";
-
-function parseFlags(args: string[]): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (let i = 0; i < args.length; i++) {
-    if (!args[i].startsWith("--")) throw new Error(`argument inattendu : ${args[i]}`);
-    const key = args[i].slice(2);
-    const val = args[i + 1];
-    if (val === undefined || val.startsWith("--")) throw new Error(`--${key} attend une valeur`);
-    out[key] = val;
-    i++;
-  }
-  return out;
-}
 
 const median = (xs: number[]) => {
   const s = [...xs].sort((a, b) => a - b);

@@ -75,3 +75,16 @@ describe("maxDrawdownPct", () => {
     expect(maxDrawdownPct([1, 2, 3])).toBe(0);
   });
 });
+
+describe("Portfolio : arrondis", () => {
+  it("ne laisse jamais un solde négatif après un achat en pleine allocation", async () => {
+    const { Portfolio } = await import("../src/portfolio.js");
+    for (const fee of [0, 0.001, 0.0033, 0.01]) {
+      for (const price of [0.1, 3, 1234.5678, 99999.99]) {
+        const pf = new Portfolio({ initialCashUsd: 1000, feeRate: fee, slippageRate: 0.0005, allocation: 1 });
+        pf.buy(price, 0);
+        expect(pf.cash).toBeGreaterThanOrEqual(0);
+      }
+    }
+  });
+});

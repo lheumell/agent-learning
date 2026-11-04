@@ -7,6 +7,7 @@ import { buildActions, runAgent } from "./agent.js";
 import { loadGuardConfig } from "./config.js";
 import { Guard } from "./guard.js";
 import { backtestCommand } from "./backtest-cli.js";
+import { paperCommand } from "./paper-cli.js";
 import { PythSource, getCheckedPrice } from "./prices.js";
 import { createWallet } from "./wallet.js";
 
@@ -22,6 +23,11 @@ async function main() {
     }
     console.log(`Adresse : ${addr}`);
     console.log("Faucet Base Sepolia : https://portal.cdp.coinbase.com/products/faucet");
+    return;
+  }
+
+  if (cmd === "paper") {
+    await paperCommand(rest);
     return;
   }
 
@@ -64,7 +70,7 @@ async function main() {
     return;
   }
 
-  console.log("Commandes : npm run wallet | npm run backtest | npm run price -- ETH | npm run agent -- \"...\" | npm run audit");
+  console.log("Commandes : npm run wallet | npm run paper | npm run backtest | npm run price -- ETH | npm run agent -- \"...\" | npm run audit");
 }
 
 main().catch((e) => {
