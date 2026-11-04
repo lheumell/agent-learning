@@ -165,6 +165,11 @@ npm run paper -- --symbol BTC --fast 5 --slow 20
 
 Pas dans ce projet : la chain est codée en dur sur Base Sepolia et le garde-fou refuse les autres. Si un jour vous voulez de l'argent réel, c'est un autre projet avec un autre niveau de sérieux (clés dans un HSM ou un service dédié, plafonds minuscules, revue de code, monitoring). Et rappelez-vous que la plupart des bots de trading perdent de l'argent après frais.
 
+## Intégration continue
+
+`.github/workflows/ci.yml` lance le typecheck et les 88 tests à chaque push sur `main` et à chaque pull request, sur Node 20 et Node 22.
+Les tests tournent **hors ligne** et n'ont besoin d'aucun secret : n'ajoutez jamais de clé API ni de clé privée aux secrets de ce dépôt pour la CI.
+
 ## Commandes
 
 | Commande | Rôle |
