@@ -12,7 +12,8 @@
     "price": "tsx src/index.ts price",
     "backtest": "tsx src/index.ts backtest",
     "paper": "tsx src/index.ts paper",
-    "walkforward": "tsx src/index.ts walkforward"
+    "walkforward": "tsx src/index.ts walkforward",
+    "history": "tsx src/index.ts history"
   },
   "keywords": [],
   "author": "",

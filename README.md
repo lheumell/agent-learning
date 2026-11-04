@@ -100,6 +100,31 @@ Ce qu'il faut en retenir :
 ⚠ Les prix simulés n'ont ni tendances réelles, ni chocs, ni cycles de volatilité. Pour juger sur du réel, fournissez un CSV d'historique (`--csv`).
 La stratégie **n'est pas branchée** au wallet ni à l'agent : c'est volontaire. Le branchement viendra après, via le garde-fou.
 
+## Données historiques réelles (`src/history.ts`)
+
+```bash
+npm run history -- --days 90                                  # 90 derniers jours, bougies d'1 h, ETH-USD
+npm run history -- --product BTC-USD --granularity 900 --start 2025-01-01 --end 2025-07-01
+npm run backtest    -- --csv data/history/ETH-USD-3600-....csv
+npm run walkforward -- --csv data/history/ETH-USD-3600-....csv
+```
+
+Source : API publique de Coinbase Exchange (sans clé). Granularités : 60, 300, 900, 3600, 21600, 86400 secondes.
+Les fichiers vont dans `data/history/` (ignoré par git).
+
+Ce que fait l'import pour que les données soient utilisables :
+- **Pagination** par 300 bougies maximum (limite de l'API), pause entre requêtes, nouvelles tentatives avec délai croissant sur 429/5xx. Il refuse un import de plus de 400 requêtes.
+- **Bougie en cours ignorée :** le `close` de la bougie courante change encore. L'utiliser reviendrait à tricher avec une donnée non définitive.
+- **Contrôle des trous :** une bougie sans transaction n'existe pas dans l'API. Le rapport indique combien en manquent et où. Le backtest traite chaque ligne comme une barre consécutive, donc des trous faussent les moyennes mobiles. `--strict` refuse d'écrire un fichier avec des trous.
+- Doublons supprimés, lignes incohérentes (prix ≤ 0, high < low) rejetées, produit et dates validés.
+- Refuse d'écraser un fichier existant sans `--force`.
+
+Pour juger sur du réel, **utilisez le walk-forward plutôt qu'un seul backtest** : le passé a pu servir à choisir les paramètres.
+Gardez aussi une dernière période de données que vous ne regardez jamais avant d'avoir figé vos choix.
+
+⚠ **Jamais testé contre l'API réelle** (bloquée dans l'environnement de développement) : écrit d'après la documentation et validé contre un faux serveur qui reproduit la limite de 300 bougies, l'ordre du plus récent au plus ancien et les erreurs 429.
+Premier essai : `npm run history -- --days 3`. Si le format de réponse a changé, l'erreur indiquera ce qui a été reçu.
+
 ## Walk-forward : pourquoi un beau backtest ment (`src/walkforward.ts`)
 
 Si vous essayez 35 combinaisons de paramètres et gardez la meilleure, elle paraîtra bonne **même sur du hasard pur**.
@@ -175,6 +200,7 @@ Les tests tournent **hors ligne** et n'ont besoin d'aucun secret : n'ajoutez jam
 | Commande | Rôle |
 |---|---|
 | `npm run wallet` | génère/affiche le wallet de test |
+| `npm run history -- --days 90` | télécharge des bougies historiques (Coinbase Exchange, sans clé) en CSV |
 | `npm run walkforward -- --seeds 300` | test walk-forward : paramètres choisis sur le passé, jugés sur des données jamais vues |
 | `npm run paper -- --ticks 5 --interval 10` | mode papier : prix réels, argent fictif (`status` pour l'état, Ctrl+C pour arrêter) |
 | `npm run backtest -- --seeds 300` | teste la stratégie sur des séries simulées (ou `--csv` pour de vrais prix) |
@@ -194,6 +220,7 @@ Les tests tournent **hors ligne** et n'ont besoin d'aucun secret : n'ajoutez jam
 | `src/config.ts` | lecture des limites depuis `.env` |
 | `src/strategy.ts` | stratégie de croisement de moyennes mobiles (SMA), pure et sans effet de bord |
 | `src/portfolio.ts` | le code d'exécution (achat, vente, frais, slippage), partagé par le backtest et le mode papier |
+| `src/history.ts` | import de bougies historiques : pagination, nouvelles tentatives, contrôle des trous |
 | `src/walkforward.ts` | walk-forward : optimisation sur une fenêtre, évaluation sur la suivante, sans fuite du futur |
 | `src/paper.ts` | trader papier : prix en direct, état sauvegardé, reprise après redémarrage, journal |
 | `src/backtest.ts` | simulateur : frais, slippage, exécution à la barre suivante, comparaison à « acheter-garder » |
