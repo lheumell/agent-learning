@@ -100,6 +100,41 @@ Ce qu'il faut en retenir :
 ⚠ Les prix simulés n'ont ni tendances réelles, ni chocs, ni cycles de volatilité. Pour juger sur du réel, fournissez un CSV d'historique (`--csv`).
 La stratégie **n'est pas branchée** au wallet ni à l'agent : c'est volontaire. Le branchement viendra après, via le garde-fou.
 
+## Walk-forward : pourquoi un beau backtest ment (`src/walkforward.ts`)
+
+Si vous essayez 35 combinaisons de paramètres et gardez la meilleure, elle paraîtra bonne **même sur du hasard pur**.
+Le walk-forward mesure cet effet : on choisit les paramètres sur une fenêtre (entraînement), puis on les juge sur la fenêtre suivante
+(test), que le choix n'a jamais vue, puis on fait glisser le tout.
+
+```bash
+npm run walkforward                          # une série : tableau fenêtre par fenêtre
+npm run walkforward -- --seeds 300           # 300 séries : la distribution
+npm run walkforward -- --seeds 300 --drift 0.0005
+npm run walkforward -- --csv prix.csv --train 500 --test 250
+```
+
+**Marche aléatoire (aucun avantage possible par construction), 300 séries, 35 jeux de paramètres :**
+
+| | Par 100 barres (médiane) |
+|---|---|
+| Entraînement, meilleurs paramètres | **+2,00 %** |
+| Test, mêmes paramètres, données neuves | **−0,63 %** |
+
+| Rendement composé sur les fenêtres de test (médiane) | |
+|---|---|
+| Paramètres optimisés | −10,1 % |
+| Paramètres fixes 10/30 (sans optimiser) | −11,2 % |
+| Acheter-garder | −5,1 % |
+
+- L'optimisation « trouve » +2 % par 100 barres dans du bruit : c'est du **biais de sélection**, pas un avantage.
+- Optimiser ne fait pas mieux que ne pas optimiser (52 % des séries : un pile ou face).
+- En marché haussier (`--drift 0.0005`), l'optimisé bat acheter-garder dans 6 % des séries seulement.
+
+**Comment le code évite de tricher :** les paramètres d'une fenêtre ne lisent que `prices[début, début + entraînement)`. Un test modifie tous les prix à partir du début du test et vérifie que les paramètres choisis ne bougent pas. J'ai aussi vérifié que ce test échoue si l'on introduit volontairement une fuite du futur.
+
+Conventions : chaque fenêtre de test repart sans position ; la stratégie reçoit `slow` barres d'échauffement *avant* la fenêtre (passé uniquement) pour ne pas perdre son début.
+La comparaison entraînement/test est ramenée à « pour 100 barres », car les fenêtres n'ont pas la même longueur.
+
 ## Mode papier (`src/paper.ts`)
 
 Même stratégie, **vrais prix Pyth**, **argent fictif**. Aucune transaction, aucun wallet : ça ne peut rien dépenser.
@@ -135,6 +170,7 @@ Pas dans ce projet : la chain est codée en dur sur Base Sepolia et le garde-fou
 | Commande | Rôle |
 |---|---|
 | `npm run wallet` | génère/affiche le wallet de test |
+| `npm run walkforward -- --seeds 300` | test walk-forward : paramètres choisis sur le passé, jugés sur des données jamais vues |
 | `npm run paper -- --ticks 5 --interval 10` | mode papier : prix réels, argent fictif (`status` pour l'état, Ctrl+C pour arrêter) |
 | `npm run backtest -- --seeds 300` | teste la stratégie sur des séries simulées (ou `--csv` pour de vrais prix) |
 | `npm run price -- ETH` | affiche le prix (Pyth) après contrôle de qualité |
@@ -153,6 +189,7 @@ Pas dans ce projet : la chain est codée en dur sur Base Sepolia et le garde-fou
 | `src/config.ts` | lecture des limites depuis `.env` |
 | `src/strategy.ts` | stratégie de croisement de moyennes mobiles (SMA), pure et sans effet de bord |
 | `src/portfolio.ts` | le code d'exécution (achat, vente, frais, slippage), partagé par le backtest et le mode papier |
+| `src/walkforward.ts` | walk-forward : optimisation sur une fenêtre, évaluation sur la suivante, sans fuite du futur |
 | `src/paper.ts` | trader papier : prix en direct, état sauvegardé, reprise après redémarrage, journal |
 | `src/backtest.ts` | simulateur : frais, slippage, exécution à la barre suivante, comparaison à « acheter-garder » |
 | `src/simulate.ts` | prix simulés reproductibles (graine) + lecture de CSV |

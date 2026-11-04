@@ -11,7 +11,8 @@
     "typecheck": "tsc",
     "price": "tsx src/index.ts price",
     "backtest": "tsx src/index.ts backtest",
-    "paper": "tsx src/index.ts paper"
+    "paper": "tsx src/index.ts paper",
+    "walkforward": "tsx src/index.ts walkforward"
   },
   "keywords": [],
   "author": "",
