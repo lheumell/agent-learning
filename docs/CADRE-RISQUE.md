@@ -103,6 +103,49 @@ npm run entry -- --rule dip --csv data/history/FICHIER.csv --holdout 0.2 --lookb
 
 (0,00001 par heure = 0,001 % du notionnel par heure, environ 0,024 % par jour ; 0,0001 = environ 0,24 % par jour. Ce sont des ordres de grandeur pour la sensibilité, pas le tarif d'une plateforme.)
 
+## Une règle qui ne marche que dans une situation
+
+Une règle peut ne rien valoir en moyenne et bien marcher dans un régime précis, annulée par les autres. C'est plausible : l'achat après une baisse bat le hasard à 100 % sur un marché qui revient à la moyenne, et fait pire que lui (9 %) sur un marché à tendances. Mais « sur une situation » est aussi le terrain où l'on se trompe le plus : en cherchant après coup, on trouve toujours une situation où ça a marché. Pour que ce soit un test et non un récit, la situation doit être :
+
+1. **Définie avant de regarder les résultats**, par une condition chiffrée. « Quand ça a bien marché » n'est pas une situation.
+2. **Reconnaissable en temps réel**, avec le seul passé.
+3. **Comparée à des entrées au hasard dans la même situation**, sinon c'est la situation qui gagne, pas la règle.
+4. **Confirmée sur un autre actif**, avec les mêmes paramètres.
+
+Filtres disponibles (`--gate`), dont les valeurs par défaut sont des repères **non optimisés** : fixez la fenêtre et le seuil **avant** de lancer, ne les balayez pas.
+
+| Filtre | Condition (sur les barres passées seulement) |
+|---|---|
+| `range` | marché sans tendance : ratio d'efficacité de Kaufman sur `--gate-window` barres ≤ `--gate-threshold` (48 ; 0,12). Une marche aléatoire donne environ 1/√48 ≈ 0,14 |
+| `trend` | marché en tendance : même ratio ≥ seuil (0,3) |
+| `calm` / `stress` | volatilité des 24 dernières barres ≤ 0,7× / ≥ 1,5× la volatilité des 120 dernières |
+
+La sortie a trois colonnes : **règle**, **hasard filtré** (entrées au hasard soumises au même filtre) et **hasard libre** (même nombre d'entrées sans filtre). Le premier écart isole ce que la **règle** apporte ; le second, ce que la **situation** apporte. Dans un marché sans tendance, presque n'importe quelle entrée gagne avec une prise de gain et un stop : sans la colonne « hasard libre », on prendrait l'effet de la situation pour de l'habileté.
+
+Cas témoin : un marché simulé qui alterne des phases de retour à la moyenne et de tendance (`--model mix`), 60 trajectoires, achat après une baisse (24 barres, −4 %), prise de gain 3 %, levier 5×, stop :
+
+| Situation | Règle | Hasard filtré | Hasard libre | Percentile vs hasard filtré | Filtre ouvert |
+|---|---|---|---|---|---|
+| aucun filtre | +21,4 % | — | −4,7 % | 67 % | — |
+| `range` | **+26,4 %** | +12,3 % | −0,1 % | 65 % (75 % vs hasard libre) | 17 % du temps |
+| `trend` | −23,6 % | −11,8 % | — | **34 %** (23 % des trajectoires parmi les pires) | 1 % du temps |
+| marche aléatoire, `range` | −2,1 % | −4,4 % | — | **49 %** | 15 % du temps |
+
+Sur ce marché, la situation « range » apporte environ 12 points même à des entrées au hasard, et la règle en ajoute environ 14. La situation « tendance » nuit à cette règle. Et sur une marche aléatoire, le filtre ne fait apparaître aucun avantage.
+
+Procédure sur de vrais prix :
+
+1. Choisissez la situation **et ses paramètres**, par écrit, avant de lancer.
+2. Un filtre réduit le nombre d'entrées (17 % du temps ouvert ici) : le résultat est plus bruité, pas moins. Utilisez `--blocks`.
+3. Lancez sur un actif, puis sur un autre, avec les mêmes paramètres :
+
+```bash
+npm run entry -- --rule dip --csv data/history/FICHIER.csv --holdout 0.2 --blocks 4 --gate range --lookback 48 --drop 0.04 --tp 0.05 --stake 0.1 --leverage 5 --policy bounded --financing 0.00001
+```
+
+4. Critères à fixer avant, par exemple : percentile moyen par bloc ≥ 65 % contre le hasard **filtré** sur les deux actifs, **et** rendement net de financement supérieur à 0 % et à « garder l'actif ».
+5. La période réservée n'est ouverte qu'une fois, si tout le reste est validé.
+
 ## Limites du simulateur
 
 - **Les premiers résultats de ce document (`npm run ruin`) utilisent des entrées sans avantage.** Si votre règle d'entrée en a un, la conclusion change pour *votre* stratégie : c'est ce que teste `npm run entry` (section précédente).

@@ -25,7 +25,7 @@ export interface SyntheticOptions {
    * "ou"  : Ornstein-Uhlenbeck sur le log-prix, le prix est rappelé vers `start` (cas témoin positif :
    *         un avantage réel EXISTE, un bon test doit le détecter). `drift` est ignoré dans ce modèle.
    */
-  model?: "gbm" | "ou" | "mom";
+  model?: "gbm" | "ou" | "mom" | "mix";
   /** Force de rappel par barre pour "ou" (0.05 = demi-vie d'environ 14 barres). */
   theta?: number;
   /**
@@ -34,15 +34,22 @@ export interface SyntheticOptions {
    * `phi` proche de 1 = tendances longues (défaut 0.98, durée caractéristique ≈ 50 barres).
    */
   phi?: number;
+  /**
+   * "mix" : le marché alterne, par segments, des phases de retour à la moyenne (comme "ou") et des phases de tendance
+   * (comme "mom"), tirées au hasard. Un avantage n'y existe que dans certaines phases : cas témoin pour un avantage
+   * CONDITIONNEL à une situation. Durée moyenne d'une phase : `segment` barres (défaut 500).
+   */
+  segment?: number;
   /** "mom" : amplitude des tendances, en multiples de `vol` (défaut 0.15 : dérive typique de ±0,15 écart-type par barre). */
   trend?: number;
 }
 
 /** Mouvement brownien géométrique : les prix restent strictement positifs. */
 export function syntheticPrices(o: SyntheticOptions): number[] {
-  const { n, seed, start = 100, drift = 0, vol = 0.01, model = "gbm", theta = 0.05, phi = 0.98, trend = 0.15 } = o;
+  const { n, seed, start = 100, drift = 0, vol = 0.01, model = "gbm", theta = 0.05, phi = 0.98, trend = 0.15, segment = 500 } = o;
   if (!Number.isInteger(n) || n < 2) throw new Error("n doit être un entier >= 2");
-  if (model !== "gbm" && model !== "ou" && model !== "mom") throw new Error(`modèle inconnu : ${model} (gbm | ou | mom)`);
+  if (model !== "gbm" && model !== "ou" && model !== "mom" && model !== "mix") throw new Error(`modèle inconnu : ${model} (gbm | ou | mom | mix)`);
+  if (!(segment >= 50)) throw new Error("segment doit être >= 50");
   if (!(phi > -1 && phi < 1)) throw new Error("phi doit être dans ]-1, 1[");
   if (!(trend >= 0)) throw new Error("trend doit être >= 0");
   if (!(theta > 0 && theta <= 1)) throw new Error("theta doit être dans ]0, 1]");
@@ -51,6 +58,32 @@ export function syntheticPrices(o: SyntheticOptions): number[] {
     const u = Math.max(rnd(), 1e-12);
     return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rnd());
   };
+  if (model === "mix") {
+    const eta = trend * vol * Math.sqrt(1 - phi * phi);
+    const segLen = () => Math.max(50, Math.round(segment * (0.5 + rnd())));
+    let x = Math.log(start);
+    let anchor = x;
+    let mu = 0;
+    let kind: "ou" | "trend" = rnd() < 0.5 ? "ou" : "trend";
+    let left = segLen();
+    const out = [start];
+    for (let i = 1; i < n; i++) {
+      if (left <= 0) {
+        kind = rnd() < 0.5 ? "ou" : "trend";
+        anchor = x;
+        mu = 0;
+        left = segLen();
+      }
+      if (kind === "ou") x = x + theta * (anchor - x) + vol * normal();
+      else {
+        mu = phi * mu + eta * normal();
+        x = x + mu - (vol * vol) / 2 + vol * normal();
+      }
+      out.push(Math.exp(x));
+      left--;
+    }
+    return out;
+  }
   if (model === "mom") {
     const out = [start];
     const eta = trend * vol * Math.sqrt(1 - phi * phi); // écart-type de la dérive = trend x vol

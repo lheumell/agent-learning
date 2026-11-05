@@ -340,7 +340,7 @@ Les tests tournent **hors ligne** et n'ont besoin d'aucun secret : n'ajoutez jam
 
 | Commande | Rôle |
 |---|---|
-| `npm run entry -- --rule dip --csv fichier.csv --holdout 0.2 --blocks 4` | teste une règle d'entrée (achat après une baisse, cassure) contre des entrées au hasard, mêmes sorties ; `--blocks` vérifie la régularité dans le temps, `--financing` les coûts d'emprunt |
+| `npm run entry -- --rule dip --csv fichier.csv --holdout 0.2 --blocks 4` | teste une règle d'entrée (achat après une baisse, cassure) contre des entrées au hasard, mêmes sorties ; `--blocks` vérifie la régularité dans le temps, `--financing` les coûts d'emprunt, `--gate range\|trend\|calm\|stress` limite la règle à une situation chiffrée |
 | `npm run ruin -- --seeds 300` | simule « petit gain + réinjection » contre « risque borné » avec levier et liquidation (voir `docs/CADRE-RISQUE.md`) |
 | `npm run dashboard` | tableau de bord local en lecture seule (http://localhost:8787) |
 | `npm run wallet` | génère/affiche le wallet de test (paquets de l'agent requis) |

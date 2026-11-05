@@ -2,6 +2,7 @@ import { parseFlags } from "./cli-utils.js";
 import { BreakoutRule, DipRule, RandomRule, type Sides } from "./entries.js";
 import { splitHoldout, recordLook } from "./holdout.js";
 import { DEFAULT_LEVERAGE, simulateLeveraged, summarize, type EntryRule, type LeverageConfig, type PathResult, type Policy, type Summary } from "./leverage.js";
+import { GatedRule, makeGateFactory, parseGateName, type Gate } from "./regimes.js";
 import { loadPaths } from "./ruin-cli.js";
 import { loadCsvPrices } from "./simulate.js";
 
@@ -11,10 +12,15 @@ export const ENTRY_USAGE = `Usage : npm run entry -- --rule dip|breakout [option
   --rule dip         « j'achète après une baisse » : --lookback 48 --drop 0.04
   --rule breakout    « je suis la cassure d'un niveau » : --lookback 48
   --sides both|long  les deux sens (défaut) ou achat seulement
+  Situation : --gate none|range|trend|calm|stress  n'agir que dans une situation, définie par une condition chiffrée
+              range  = marché sans tendance : ratio d'efficacité sur --gate-window barres <= --gate-threshold (défaut 48 ; 0.12)
+              trend  = marché en tendance : même ratio >= --gate-threshold (défaut 0.3)
+              calm / stress = volatilité récente / volatilité normale <= 0.7 / >= 1.5 (fenêtre 24)
+              Les entrées au hasard de référence sont soumises au MÊME filtre. Fixez la situation AVANT de regarder.
   Sorties et risque : --policy both|reinject|bounded  --tp 0.05  --stake 0.1  --leverage 5  --stop  --trigger  --fraction
                       --hold 2000  --cooldown 5  --fee 0.0005  --mmr 0.005  --wallet 10000
                       --financing 0.00002  coût de financement par barre (part du notionnel), d'après le barème de votre plateforme
-  Données : --seeds 100 --n 4000 --vol 0.007 --drift 0 --model gbm|ou|mom (prix simulés ; mom : --phi 0.98 --trend 0.15)
+  Données : --seeds 100 --n 4000 --vol 0.007 --drift 0 --model gbm|ou|mom|mix (prix simulés ; mom : --phi 0.98 --trend 0.15 ; mix : phases alternées, --segment 500)
         ou  --csv fichier.csv [--n 4000] (fenêtres glissantes de vrais prix, qui se recouvrent)
   Période réservée (CSV) : --holdout 0.2 (travailler sans les 20 % finaux) puis --final (les évaluer UNE fois)
   Régularité (CSV) : --blocks 4 découpe en 4 périodes consécutives sans recouvrement et évalue chacune séparément
@@ -41,28 +47,53 @@ export interface EntryEval {
   longs: number;
   shorts: number;
   entries: number;
+  /** Part médiane du temps disponible pendant laquelle le filtre de situation était ouvert (100 sans filtre). */
+  gateOpenPct: number;
+  /**
+   * Avec un filtre : entrées au hasard SANS filtre, mêmes sorties, même nombre d'entrées. Isole ce que « la règle dans
+   * sa situation » apporte par rapport à ne rien sélectionner (le filtre seul peut rendre profitable un hasard).
+   */
+  randomNoGate?: Summary;
+  meanBeatNoGatePct?: number;
 }
 
 /**
  * Compare une règle d'entrée à des entrées AU HASARD, avec les mêmes sorties, le même levier et, par trajectoire,
  * la même fréquence d'entrée (probabilité calibrée sur les signaux de la règle).
  */
-export function evaluateRule(series: number[][], cfg: LeverageConfig, make: () => EntryRule, sides: Sides, K: number): EntryEval {
+export function evaluateRule(series: number[][], cfg: LeverageConfig, make: () => EntryRule, sides: Sides, K: number, makeGate?: () => Gate): EntryEval {
   const ruleRes: PathResult[] = [];
   const randRes: PathResult[] = [];
+  const noGateRes: PathResult[] = [];
   const beats: number[] = [];
+  const beatsNoGate: number[] = [];
   series.forEach((p, pi) => {
     const r = simulateLeveraged(p, cfg, make());
     ruleRes.push(r);
-    const prob = Math.min(0.5, Math.max(0.0005, r.signalsEligible / Math.max(1, r.eligibleBars)));
+    // Fréquence par barre OUVERTE : le hasard, soumis au même filtre, agit alors aussi souvent que la règle quand il peut.
+    const prob = Math.min(0.5, Math.max(0.0005, r.signalsEligible / Math.max(1, r.gateOpenBars)));
     let below = 0;
     for (let k = 0; k < K; k++) {
-      const rr = simulateLeveraged(p, cfg, new RandomRule(prob, pi * 100003 + k + 1, sides));
+      const rnd = new RandomRule(prob, pi * 100003 + k + 1, sides);
+      const rr = simulateLeveraged(p, cfg, makeGate ? new GatedRule(rnd, makeGate()) : rnd);
       randRes.push(rr);
       if (rr.finalWallet < r.finalWallet) below++;
       else if (rr.finalWallet === r.finalWallet) below += 0.5;
     }
     beats.push((below / K) * 100);
+
+    if (makeGate) {
+      // même nombre d'entrées, réparties sur tout le temps disponible (hors filtre)
+      const prob2 = Math.min(0.5, Math.max(0.0005, r.signalsEligible / Math.max(1, r.eligibleBars)));
+      let below2 = 0;
+      for (let k = 0; k < K; k++) {
+        const rr = simulateLeveraged(p, cfg, new RandomRule(prob2, pi * 100003 + k + 50001, sides));
+        noGateRes.push(rr);
+        if (rr.finalWallet < r.finalWallet) below2++;
+        else if (rr.finalWallet === r.finalWallet) below2 += 0.5;
+      }
+      beatsNoGate.push((below2 / K) * 100);
+    }
   });
   return {
     beats,
@@ -74,6 +105,9 @@ export function evaluateRule(series: number[][], cfg: LeverageConfig, make: () =
     longs: median(ruleRes.map((r) => r.longs)),
     shorts: median(ruleRes.map((r) => r.shorts)),
     entries: median(ruleRes.map((r) => r.entries)),
+    gateOpenPct: median(ruleRes.map((r) => (r.eligibleBars ? (r.gateOpenBars / r.eligibleBars) * 100 : 0))),
+    randomNoGate: makeGate ? summarize(noGateRes, cfg.walletUsd) : undefined,
+    meanBeatNoGatePct: makeGate ? beatsNoGate.reduce((a, b) => a + b, 0) / beatsNoGate.length : undefined,
   };
 }
 
@@ -109,7 +143,13 @@ export function entryCommand(args: string[], log: (s: string) => void = console.
   const sides = (f.sides ?? "both") as Sides;
   const lookback = num("lookback", 48);
   const drop = num("drop", 0.04);
-  const make = (): EntryRule => (f.rule === "dip" ? new DipRule(lookback, drop, sides) : new BreakoutRule(lookback, sides));
+  const inner = (): EntryRule => (f.rule === "dip" ? new DipRule(lookback, drop, sides) : new BreakoutRule(lookback, sides));
+  const makeGate = makeGateFactory(
+    parseGateName(f.gate),
+    f["gate-window"] === undefined ? undefined : num("gate-window", 0),
+    f["gate-threshold"] === undefined ? undefined : num("gate-threshold", 0),
+  );
+  const make = (): EntryRule => (makeGate ? new GatedRule(inner(), makeGate()) : inner());
   const ruleName = make().name; // valide aussi les paramètres tout de suite
 
   const which = f.policy ?? "both";
@@ -187,7 +227,7 @@ export function entryCommand(args: string[], log: (s: string) => void = console.
 
   // --- simulation : règle contre hasard
   const out: Record<string, EntryEval> = {};
-  for (const policy of policies) out[policy] = evaluateRule(series, { ...base, policy }, make, sides, K);
+  for (const policy of policies) out[policy] = evaluateRule(series, { ...base, policy }, make, sides, K, makeGate);
 
   log(`Règle ${ruleName} · ${label}`);
   log(
@@ -200,16 +240,23 @@ export function entryCommand(args: string[], log: (s: string) => void = console.
     const o = out[policy];
     log("");
     log(policy === "reinject" ? "— Sortie : on réinjecte à fond quand on approche de la liquidation —" : "— Sortie : risque borné, stop prévu à l'avance —");
-    const head = "  " + "".padEnd(38) + "règle".padStart(12) + "au hasard".padStart(12);
-    log(head);
-    const row = (l: string, a: string, b: string) => log("  " + l.padEnd(38) + a.padStart(12) + b.padStart(12));
-    row("Positions gagnantes", o.rule.tradeWinRatePct === null ? "—" : `${o.rule.tradeWinRatePct.toFixed(1)} %`, o.random.tradeWinRatePct === null ? "—" : `${o.random.tradeWinRatePct.toFixed(1)} %`);
-    row("Capital final, médiane", pct(o.rule.medianFinalPct), pct(o.random.medianFinalPct));
-    row("Capital final, moyenne", pct(o.rule.meanFinalPct), pct(o.random.meanFinalPct));
-    row("Trajectoires avec perte ≥ 50 %", `${o.rule.loss50Pct.toFixed(1)} %`, `${o.random.loss50Pct.toFixed(1)} %`);
-    row("Trajectoires avec perte ≥ 90 %", `${o.rule.loss90Pct.toFixed(1)} %`, `${o.random.loss90Pct.toFixed(1)} %`);
-    row("Au moins une liquidation", `${o.rule.liquidatedPct.toFixed(0)} %`, `${o.random.liquidatedPct.toFixed(0)} %`);
-    row("Positions, médiane", o.rule.medianTrades.toFixed(0), o.random.medianTrades.toFixed(0));
+    const ng = o.randomNoGate;
+    log("  " + "".padEnd(38) + "règle".padStart(12) + (ng ? "hasard filtré".padStart(15) + "hasard libre".padStart(14) : "au hasard".padStart(12)));
+    const row = (l: string, a: string, b: string, c?: string) =>
+      log("  " + l.padEnd(38) + a.padStart(12) + (ng ? b.padStart(15) + (c ?? "").padStart(14) : b.padStart(12)));
+    const w = (s: Summary) => (s.tradeWinRatePct === null ? "—" : `${s.tradeWinRatePct.toFixed(1)} %`);
+    row("Positions gagnantes", w(o.rule), w(o.random), ng && w(ng));
+    row("Capital final, médiane", pct(o.rule.medianFinalPct), pct(o.random.medianFinalPct), ng && pct(ng.medianFinalPct));
+    row("Capital final, moyenne", pct(o.rule.meanFinalPct), pct(o.random.meanFinalPct), ng && pct(ng.meanFinalPct));
+    row("Trajectoires avec perte ≥ 50 %", `${o.rule.loss50Pct.toFixed(1)} %`, `${o.random.loss50Pct.toFixed(1)} %`, ng && `${ng.loss50Pct.toFixed(1)} %`);
+    row("Trajectoires avec perte ≥ 90 %", `${o.rule.loss90Pct.toFixed(1)} %`, `${o.random.loss90Pct.toFixed(1)} %`, ng && `${ng.loss90Pct.toFixed(1)} %`);
+    row("Au moins une liquidation", `${o.rule.liquidatedPct.toFixed(0)} %`, `${o.random.liquidatedPct.toFixed(0)} %`, ng && `${ng.liquidatedPct.toFixed(0)} %`);
+    row("Positions, médiane", o.rule.medianTrades.toFixed(0), o.random.medianTrades.toFixed(0), ng && ng.medianTrades.toFixed(0));
+    if (makeGate) {
+      log(`  Filtre de situation ouvert ${o.gateOpenPct.toFixed(0)} % du temps disponible.`);
+      log("  « hasard filtré » : entrées au hasard soumises au même filtre → isole l'apport de la RÈGLE. « hasard libre » : même nombre d'entrées sans filtre → montre l'apport de la SITUATION choisie.");
+      log(`  La règle dans sa situation finit mieux que ${o.meanBeatNoGatePct!.toFixed(0)} % des entrées au hasard libres (percentile moyen).`);
+    }
     log(`  La règle ouvre en médiane ${o.entries.toFixed(0)} positions (${o.longs.toFixed(0)} achats, ${o.shorts.toFixed(0)} ventes à découvert).`);
     log(
       series.length === 1

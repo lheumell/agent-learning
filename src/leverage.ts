@@ -24,6 +24,8 @@ export type EntrySignal = Side | null;
 export interface EntryRule {
   readonly name: string;
   onPrice(price: number): EntrySignal;
+  /** Facultatif : la règle est-elle dans sa situation (filtre ouvert) ? Sert à compter le temps disponible. */
+  isOpen?(): boolean;
 }
 
 export interface LeverageConfig {
@@ -90,6 +92,8 @@ export interface PathResult {
   shorts: number;
   /** Barres où l'on était à plat, hors délai d'attente, avec de quoi ouvrir : le « temps disponible pour entrer ». */
   eligibleBars: number;
+  /** Parmi ces barres, celles où le filtre de situation était ouvert (= eligibleBars sans filtre). */
+  gateOpenBars: number;
   /** Signaux d'entrée vus pendant ces barres (sert à calibrer une référence au hasard de même fréquence). */
   signalsEligible: number;
   /** Durée de la plus longue position, en barres. */
@@ -141,7 +145,7 @@ export function simulateLeveraged(prices: number[], config: Partial<LeverageConf
   let cooldownLeft = 0;
   let pending: Side | null = null;
   let peak = c.walletUsd;
-  const r = { trades: 0, wins: 0, liquidations: 0, stops: 0, timeouts: 0, reinjections: 0, longest: 0, maxDD: 0, peakRisk: 0, entries: 0, longs: 0, shorts: 0, eligible: 0, signals: 0 };
+  const r = { trades: 0, wins: 0, liquidations: 0, stops: 0, timeouts: 0, reinjections: 0, longest: 0, maxDD: 0, peakRisk: 0, entries: 0, longs: 0, shorts: 0, eligible: 0, gateOpen: 0, signals: 0 };
 
   const open = (s: Side, price: number, bar: number): boolean => {
     const m = Math.min(cash * c.stakeFraction, cash / (1 + c.leverage * c.feeRate));
@@ -218,6 +222,7 @@ export function simulateLeveraged(prices: number[], config: Partial<LeverageConf
       const signal = rule.onPrice(p); // appelée à chaque barre : la règle garde son état à jour
       if (canEnter && !inPos) {
         r.eligible++;
+        if (!rule.isOpen || rule.isOpen()) r.gateOpen++;
         if (signal) {
           r.signals++;
           pending = signal;
@@ -252,6 +257,7 @@ export function simulateLeveraged(prices: number[], config: Partial<LeverageConf
     longs: r.longs,
     shorts: r.shorts,
     eligibleBars: r.eligible,
+    gateOpenBars: r.gateOpen,
     signalsEligible: r.signals,
     longestHoldBars: r.longest,
     maxDrawdownPct: r.maxDD * 100,

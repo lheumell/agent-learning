@@ -13,7 +13,7 @@ export const RUIN_USAGE = `Usage : npm run ruin -- [options]
   --hold 2000        durée max d'une position (barres)       --cooldown 5   attente entre deux positions
   --fee 0.0005       frais par côté                           --mmr 0.005    marge de maintenance
   --financing 0.00002  coût de financement par barre (part du notionnel) : intérêts d'emprunt / funding de VOTRE plateforme
-  Données : --seeds 300 --n 4000 --vol 0.007 --drift 0 --model gbm|ou|mom   (prix simulés)
+  Données : --seeds 300 --n 4000 --vol 0.007 --drift 0 --model gbm|ou|mom|mix   (prix simulés ; mix : phases alternées, --segment 500)
         ou  --csv fichier.csv [--n 4000] : fenêtres glissantes de n barres sur de vrais prix (elles se recouvrent)
   L'exposition notionnelle = stake x leverage x wallet : au-dessus de 1, la ruine totale devient possible malgré la réinjection.`;
 
@@ -32,12 +32,13 @@ export function loadPaths(f: Record<string, string>, num: (k: string, d: number)
   const seeds = Math.max(1, Math.floor(num("seeds", 300)));
   const vol = num("vol", 0.007);
   const drift = num("drift", 0);
-  const model = (f.model ?? "gbm") as "gbm" | "ou" | "mom";
+  const model = (f.model ?? "gbm") as "gbm" | "ou" | "mom" | "mix";
+  const segment = f.segment === undefined ? undefined : num("segment", 500);
   const theta = num("theta", 0.05);
   const phi = f.phi === undefined ? undefined : num("phi", 0.98);
   const trend = f.trend === undefined ? undefined : num("trend", 0.15);
   return {
-    series: Array.from({ length: seeds }, (_, i) => syntheticPrices({ n, seed: i + 1, vol, drift, model, theta, phi, trend })),
+    series: Array.from({ length: seeds }, (_, i) => syntheticPrices({ n, seed: i + 1, vol, drift, model, theta, phi, trend, segment })),
     label: `${seeds} trajectoires simulées (modèle ${model}, n=${n}, vol=${vol}, drift=${drift})`,
   };
 }
