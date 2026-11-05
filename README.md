@@ -13,8 +13,8 @@ Rien ici ne touche à de l'argent réel. Le cœur ne détient aucune clé.
 
 | Domaine | Choix |
 |---|---|
-| Langage | **TypeScript 5.9** (strict, modules ES), **Node.js ≥ 20**, exécuté par **tsx** (pas d'étape de build) |
-| Tests / CI | **Vitest 5** (tous hors ligne) · **GitHub Actions** (Node 20 et 22 + image Docker) |
+| Langage | **TypeScript 5.9** (strict, modules ES), **Node.js ≥ 22.12**, exécuté par **tsx** (pas d'étape de build) |
+| Tests / CI | **Vitest 5** (tous hors ligne) · **GitHub Actions** (Node 22 et 24 + image Docker) |
 | Données de marché | API publique **Coinbase Exchange** (ticker et bougies, sans clé). Pyth écarté : son prix exige une authentification (401) |
 | Agent IA | **SDK Anthropic** (Claude) · **Coinbase AgentKit** 0.10 · **viem** · **zod** |
 | Blockchain | **Base Sepolia** (testnet), fixé en dur |
@@ -28,7 +28,7 @@ Justifications, frontières de confiance et formats de fichiers : [`docs/ARCHITE
 
 ### 1. En local, sans aucune clé (le cœur)
 
-Prérequis : Node.js 20 ou plus.
+Prérequis : **Node.js 22.12 ou plus** (les dépendances d'AgentKit et Vitest 5 l'exigent ; sur Node 20, npm ignorerait silencieusement les paquets de l'agent).
 
 ```bash
 npm install
@@ -324,7 +324,7 @@ Pas dans ce projet : la chain est codée en dur sur Base Sepolia et le garde-fou
 
 ## Intégration continue
 
-`.github/workflows/ci.yml` lance le typecheck et tous les tests à chaque push sur `main` et à chaque pull request, sur Node 20 et Node 22. Un second job construit l'image Docker, vérifie qu'elle n'embarque pas les paquets de l'agent et teste le tableau de bord dans un conteneur durci (lecture seule, sans privilèges).
+`.github/workflows/ci.yml` lance le typecheck et tous les tests à chaque push sur `main` et à chaque pull request, sur Node 22 et Node 24. Un second job construit l'image Docker, vérifie qu'elle n'embarque pas les paquets de l'agent et teste le tableau de bord dans un conteneur durci (lecture seule, sans privilèges).
 Les tests tournent **hors ligne** et n'ont besoin d'aucun secret : n'ajoutez jamais de clé API ni de clé privée aux secrets de ce dépôt pour la CI.
 
 ## Commandes

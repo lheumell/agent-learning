@@ -53,10 +53,10 @@ flowchart LR
 
 | Domaine | Choix | Pourquoi |
 |---|---|---|
-| Langage | **TypeScript 5.9** (strict, modules ES) sur **Node.js ≥ 20** | Typage fort pour du code financier ; un seul langage pour le cœur, l'agent et le tableau de bord. |
+| Langage | **TypeScript 5.9** (strict, modules ES) sur **Node.js ≥ 22.12** | Typage fort pour du code financier ; un seul langage pour le cœur, l'agent et le tableau de bord. |
 | Exécution | **tsx** (pas d'étape de build) | Démarrage simple, pas de dossier `dist` à garder synchronisé. |
 | Tests | **Vitest 5** | Rapide, TypeScript natif. Tous les tests tournent hors ligne. |
-| CI | **GitHub Actions** | Typecheck + tests sur Node 20 et 22, construction et test de l'image Docker. |
+| CI | **GitHub Actions** | Typecheck + tests sur Node 22 et 24, construction et test de l'image Docker. |
 | Données de marché | **API publique Coinbase Exchange** (ticker, bougies) | Sans clé, stable, documentée. **Pyth** a été écarté : son endpoint de prix répond 401 sans authentification. |
 | Agent IA | **SDK Anthropic** (Claude, modèle réglable via `ANTHROPIC_MODEL`) | Appel d'outils natif. |
 | Actions on-chain | **Coinbase AgentKit** 0.10 + **viem** | Wallet et actions prêts à l'emploi ; viem pour le client EVM. |
