@@ -45,6 +45,12 @@ export interface LeverageConfig {
   reinjectTrigger: number;
   /** reinject : part du capital libre injectée à chaque fois (1 = « à fond »). */
   reinjectFraction: number;
+  /**
+   * Coût de financement par barre, en part du notionnel de la position (intérêts d'emprunt en marge, ou funding
+   * d'un perpétuel). Prélevé sur la marge à chaque barre où la position est ouverte. 0 = ignoré (défaut).
+   * À régler d'après le barème de VOTRE plateforme : ce simulateur n'en connaît pas.
+   */
+  financingRate: number;
   /** Clôture forcée au prix du marché après autant de barres. */
   maxHoldBars: number;
   /** Barres d'attente à plat entre deux positions. */
@@ -61,6 +67,7 @@ export const DEFAULT_LEVERAGE: LeverageConfig = {
   policy: "reinject",
   reinjectTrigger: 0.03,
   reinjectFraction: 1,
+  financingRate: 0,
   maxHoldBars: 2000,
   cooldownBars: 5,
 };
@@ -110,6 +117,7 @@ export function validateLeverage(c: LeverageConfig) {
   if (c.stopLossPct !== undefined && !(c.stopLossPct > 0 && c.stopLossPct < 1)) throw new Error("stopLossPct doit être dans ]0, 1[");
   if (!(c.reinjectTrigger >= 0 && c.reinjectTrigger < 1)) throw new Error("reinjectTrigger doit être dans [0, 1[");
   if (!(c.reinjectFraction > 0 && c.reinjectFraction <= 1)) throw new Error("reinjectFraction doit être dans ]0, 1]");
+  if (!(c.financingRate >= 0 && c.financingRate < 0.01)) throw new Error("financingRate doit être dans [0, 0.01[ (par barre)");
   if (!(c.maxHoldBars >= 1)) throw new Error("maxHoldBars doit être >= 1");
   if (!(c.cooldownBars >= 0)) throw new Error("cooldownBars doit être >= 0");
 }
@@ -175,6 +183,7 @@ export function simulateLeveraged(prices: number[], config: Partial<LeverageConf
 
     // 1) gérer la position ouverte
     if (inPos) {
+      if (i > entryBar) margin -= c.financingRate * qty * entry; // coût de financement de la barre écoulée
       const equity = margin + sgn * qty * (p - entry);
       const hitTp = side === "long" ? p >= entry * (1 + c.takeProfitPct) : p <= entry * (1 - c.takeProfitPct);
       const hitStop = side === "long" ? p <= entry * (1 - stop) : p >= entry * (1 + stop);

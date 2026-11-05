@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { BreakoutRule, DipRule, RandomRule } from "../src/entries.js";
-import { evaluateRule, entryCommand } from "../src/entry-cli.js";
+import { evaluateRule, entryCommand, largeMoves, splitBlocks } from "../src/entry-cli.js";
 import { DEFAULT_LEVERAGE, liquidationPrice, simulateLeveraged, type EntryRule, type EntrySignal, type LeverageConfig } from "../src/leverage.js";
 import { syntheticPrices } from "../src/simulate.js";
 
@@ -247,5 +247,100 @@ describe("entryCommand", () => {
   it("avertit que des fenêtres de vrais prix qui se recouvrent ne sont pas indépendantes", () => {
     const { csv } = setup();
     expect(run2(["--rule", "dip", "--csv", csv, "--n", "1500", "--random", "5"])).toMatch(/se recouvrent/);
+  });
+});
+
+describe("coût de financement", () => {
+  it("est prélevé sur la marge à chaque barre où la position est ouverte", () => {
+    // notionnel 500, 10 barres à 0,001 : 10 x 0,5 = 5 de coût
+    const r = simulateLeveraged(Array(12).fill(100), { ...base, policy: "bounded", financingRate: 0.001, maxHoldBars: 10 });
+    expect(r.timeouts).toBe(1);
+    expect(r.finalWallet).toBeCloseTo(2000 - 5, 9);
+  });
+  it("à zéro, ne change rien", () => {
+    const flat = Array(12).fill(100);
+    expect(simulateLeveraged(flat, { ...base, policy: "bounded", maxHoldBars: 10 }).finalWallet).toBeCloseTo(2000, 9);
+  });
+  it("peut à lui seul épuiser la marge et liquider une position qui ne bouge pas", () => {
+    const r = simulateLeveraged(Array(60).fill(100), { ...base, policy: "bounded", financingRate: 0.005, maxHoldBars: 1000 });
+    expect(r.liquidations).toBe(1);
+    expect(r.finalWallet).toBeCloseTo(1900, 9);
+  });
+  it("s'applique aux ventes à découvert aussi", () => {
+    const r = simulateLeveraged(Array(12).fill(100), { ...base, policy: "bounded", financingRate: 0.001, maxHoldBars: 10 }, scripted({ 0: "short" }));
+    expect(r.finalWallet).toBeCloseTo(2000 - 5, 9);
+  });
+  it("réduit le résultat d'une règle quand il monte (sensibilité)", () => {
+    const p = syntheticPrices({ n: 2000, seed: 3, model: "ou", vol: 0.01 });
+    const f = (rate: number) => simulateLeveraged(p, { ...DEFAULT_LEVERAGE, policy: "bounded", leverage: 5, takeProfitPct: 0.03, financingRate: rate }, new DipRule(24, 0.04, "both")).finalWallet;
+    expect(f(0)).toBeGreaterThan(f(0.00005));
+    expect(f(0.00005)).toBeGreaterThan(f(0.0005));
+  });
+  it("valide le paramètre", () => {
+    expect(() => simulateLeveraged([100, 101], { financingRate: -0.1 })).toThrow(/financingRate/);
+    expect(() => simulateLeveraged([100, 101], { financingRate: 0.5 })).toThrow(/financingRate/);
+  });
+});
+
+describe("blocs et diagnostic des données", () => {
+  it("splitBlocks coupe en blocs égaux consécutifs sans recouvrement", () => {
+    const p = Array.from({ length: 1000 }, (_, i) => i + 1);
+    const b = splitBlocks(p, 4, 100);
+    expect(b).toHaveLength(4);
+    expect(b.every((x) => x.length === 250)).toBe(true);
+    expect(b[0].at(-1)! + 1).toBe(b[1][0]);
+    expect(b.flat()).toEqual(p);
+  });
+  it("splitBlocks refuse des blocs trop courts ou un nombre invalide", () => {
+    expect(() => splitBlocks(Array(1000).fill(1), 4)).toThrow(/blocs trop courts/);
+    expect(() => splitBlocks(Array(1000).fill(1), 1)).toThrow(/entier >= 2/);
+    expect(() => splitBlocks(Array(1000).fill(1), 2.5)).toThrow(/entier >= 2/);
+  });
+  it("largeMoves repère les variations extrêmes sur une barre", () => {
+    expect(largeMoves([100, 110, 99])).toEqual({ maxPct: expect.closeTo(10, 9), count: 2 });
+    expect(largeMoves([100, 101, 102]).count).toBe(0);
+  });
+  it("evaluateRule renvoie un percentile par trajectoire", () => {
+    const e = evaluateRule([1, 2, 3].map((s) => syntheticPrices({ n: 800, seed: s })), { ...DEFAULT_LEVERAGE, policy: "bounded" }, () => new BreakoutRule(24), "both", 6);
+    expect(e.beats).toHaveLength(3);
+    expect(e.beats.every((b) => b >= 0 && b <= 100)).toBe(true);
+  });
+
+  const prices = syntheticPrices({ n: 6000, seed: 4, model: "mom" });
+  const csv = () => {
+    const dir = mkdtempSync(join(tmpdir(), "blocks-"));
+    const f = join(dir, "p.csv");
+    writeFileSync(f, "close\n" + prices.join("\n") + "\n");
+    return f;
+  };
+  const run3 = (args: string[]) => {
+    const out: string[] = [];
+    entryCommand(args, (s) => out.push(s));
+    return out.join("\n");
+  };
+  it("--blocks évalue chaque période séparément, sans avertissement de recouvrement", () => {
+    const txt = run3(["--rule", "breakout", "--csv", csv(), "--blocks", "3", "--random", "6", "--policy", "bounded"]);
+    expect(txt).toMatch(/3 blocs consécutifs de 2000 barres, sans recouvrement/);
+    expect(txt).toMatch(/Percentile par bloc : \d+ % · \d+ % · \d+ %/);
+    expect(txt).not.toMatch(/se recouvrent/);
+    expect(txt).toMatch(/plus forte variation sur une barre/);
+  });
+  it("--blocks se combine avec --holdout et ne touche pas la période réservée", () => {
+    const txt = run3(["--rule", "breakout", "--csv", csv(), "--holdout", "0.2", "--blocks", "2", "--random", "6", "--policy", "bounded"]);
+    expect(txt).toMatch(/2 blocs consécutifs de 2400 barres/); // 4800 barres de développement
+    expect(txt).toMatch(/1200 barres réservées/);
+  });
+  it("--blocks est refusé sans CSV, avec --final, ou si les blocs sont trop courts", () => {
+    expect(() => run3(["--rule", "dip", "--blocks", "3"])).toThrow(/CSV/);
+    expect(() => run3(["--rule", "dip", "--csv", csv(), "--final", "--blocks", "3"])).toThrow(/incompatibles/);
+    expect(() => run3(["--rule", "dip", "--csv", csv(), "--blocks", "40"])).toThrow(/blocs trop courts/);
+  });
+  it("avertit quand une variation sur une seule barre dépasse ce qu'un stop peut contenir", () => {
+    const spiky = prices.slice();
+    spiky[3000] = spiky[2999] * 0.8; // trou de données ou krach de -20 % en une barre
+    const dir = mkdtempSync(join(tmpdir(), "spike-"));
+    const f = join(dir, "p.csv");
+    writeFileSync(f, "close\n" + spiky.join("\n") + "\n");
+    expect(run3(["--rule", "dip", "--csv", f, "--holdout", "0.2", "--random", "5", "--policy", "bounded"])).toMatch(/Un stop ne protège pas/);
   });
 });

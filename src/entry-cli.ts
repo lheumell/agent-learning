@@ -13,9 +13,11 @@ export const ENTRY_USAGE = `Usage : npm run entry -- --rule dip|breakout [option
   --sides both|long  les deux sens (défaut) ou achat seulement
   Sorties et risque : --policy both|reinject|bounded  --tp 0.05  --stake 0.1  --leverage 5  --stop  --trigger  --fraction
                       --hold 2000  --cooldown 5  --fee 0.0005  --mmr 0.005  --wallet 10000
+                      --financing 0.00002  coût de financement par barre (part du notionnel), d'après le barème de votre plateforme
   Données : --seeds 100 --n 4000 --vol 0.007 --drift 0 --model gbm|ou|mom (prix simulés ; mom : --phi 0.98 --trend 0.15)
         ou  --csv fichier.csv [--n 4000] (fenêtres glissantes de vrais prix, qui se recouvrent)
   Période réservée (CSV) : --holdout 0.2 (travailler sans les 20 % finaux) puis --final (les évaluer UNE fois)
+  Régularité (CSV) : --blocks 4 découpe en 4 périodes consécutives sans recouvrement et évalue chacune séparément
   --random 30        tirages au hasard par trajectoire (200 s'il n'y a qu'une trajectoire)`;
 
 const pct = (x: number, d = 1) => `${x >= 0 ? "+" : ""}${x.toFixed(d)} %`;
@@ -26,6 +28,8 @@ const median = (xs: number[]) => {
 };
 
 export interface EntryEval {
+  /** Percentile de la règle parmi les entrées au hasard, trajectoire par trajectoire. */
+  beats: number[];
   rule: Summary;
   random: Summary;
   /** Percentile moyen de la règle parmi les entrées au hasard (50 = aucun avantage). */
@@ -61,6 +65,7 @@ export function evaluateRule(series: number[][], cfg: LeverageConfig, make: () =
     beats.push((below / K) * 100);
   });
   return {
+    beats,
     rule: summarize(ruleRes, cfg.walletUsd),
     random: summarize(randRes, cfg.walletUsd),
     meanBeatPct: beats.reduce((a, b) => a + b, 0) / beats.length,
@@ -70,6 +75,26 @@ export function evaluateRule(series: number[][], cfg: LeverageConfig, make: () =
     shorts: median(ruleRes.map((r) => r.shorts)),
     entries: median(ruleRes.map((r) => r.entries)),
   };
+}
+
+/** Découpe une série en N blocs consécutifs de même taille, sans recouvrement. */
+export function splitBlocks(prices: number[], n: number, minBars = 500): number[][] {
+  if (!Number.isInteger(n) || n < 2) throw new Error("--blocks doit être un entier >= 2");
+  const size = Math.floor(prices.length / n);
+  if (size < minBars) throw new Error(`blocs trop courts : ${size} barres (minimum ${minBars}). Réduisez --blocks ou utilisez plus de données.`);
+  return Array.from({ length: n }, (_, i) => prices.slice(i * size, (i + 1) * size));
+}
+
+/** Variations extrêmes sur UNE barre : révèle les trous de données ou les krachs que le stop ne peut pas éviter. */
+export function largeMoves(prices: number[], threshold = 0.08): { maxPct: number; count: number } {
+  let max = 0;
+  let count = 0;
+  for (let i = 1; i < prices.length; i++) {
+    const r = Math.abs(prices[i] / prices[i - 1] - 1);
+    max = Math.max(max, r);
+    if (r >= threshold) count++;
+  }
+  return { maxPct: max * 100, count };
 }
 
 export function entryCommand(args: string[], log: (s: string) => void = console.log, deps: { logPath?: string } = {}) {
@@ -100,6 +125,7 @@ export function entryCommand(args: string[], log: (s: string) => void = console.
     stopLossPct: f.stop === undefined ? undefined : num("stop", 0),
     reinjectTrigger: num("trigger", DEFAULT_LEVERAGE.reinjectTrigger),
     reinjectFraction: num("fraction", DEFAULT_LEVERAGE.reinjectFraction),
+    financingRate: num("financing", 0),
     maxHoldBars: num("hold", DEFAULT_LEVERAGE.maxHoldBars),
     cooldownBars: num("cooldown", DEFAULT_LEVERAGE.cooldownBars),
   };
@@ -128,11 +154,32 @@ export function entryCommand(args: string[], log: (s: string) => void = console.
         series = [sp.dev];
         label = `${f.csv}, partie développement (${sp.dev.length} barres ; ${sp.holdout.length} barres réservées, non utilisées)`;
       }
+    } else if (f.blocks !== undefined) {
+      series = [loadCsvPrices(f.csv)]; // --blocks découpe le fichier ENTIER, pas une fenêtre glissante
+      label = `${f.csv}, fichier entier (${series[0].length} barres)`;
     } else {
       ({ series, label } = loadPaths(f, num));
     }
   } else {
     ({ series, label } = loadPaths(f, num));
+  }
+  let blocksMode = false;
+  let dataNote = "";
+  if (f.csv) {
+    if (f.final === "true" && f.blocks !== undefined) throw new Error("--blocks et --final sont incompatibles");
+    const all = series.flat();
+    if (f.blocks !== undefined) {
+      series = splitBlocks(series[0], num("blocks", 0));
+      blocksMode = true;
+      label += ` · ${series.length} blocs consécutifs de ${series[0].length} barres, sans recouvrement`;
+    }
+    if (f.final !== "true" && f.blocks === undefined && series.length === 1 || blocksMode) {
+      const m = largeMoves(blocksMode ? all : series[0]);
+      dataNote = `Données : plus forte variation sur une barre ±${m.maxPct.toFixed(1)} % ; ${m.count} barre(s) à ±8 % ou plus.` +
+        (m.maxPct >= 10 ? " Un stop ne protège pas d'une variation de cette taille en une seule barre (trou de données ou krach)." : "");
+    }
+  } else if (f.blocks !== undefined) {
+    throw new Error("--blocks s'applique aux fichiers CSV (--csv)");
   }
   const K = Math.max(5, Math.floor(num("random", series.length === 1 ? 200 : 30)));
 
@@ -145,7 +192,8 @@ export function entryCommand(args: string[], log: (s: string) => void = console.
     `Capital ${base.walletUsd} · marge ${(base.stakeFraction * 100).toFixed(0)} % · levier ${base.leverage}× (exposition ${(base.stakeFraction * base.leverage * 100).toFixed(0)} %) · ` +
       `prise de gain ${(base.takeProfitPct * 100).toFixed(1)} % · ${K} tirages au hasard par trajectoire`,
   );
-  if (series.length > 1 && f.csv) log("⚠ Fenêtres de vrais prix qui se recouvrent : elles ne sont pas indépendantes, ne comptez pas les trajectoires comme autant de preuves.");
+  if (series.length > 1 && f.csv && !blocksMode) log("⚠ Fenêtres de vrais prix qui se recouvrent : elles ne sont pas indépendantes, ne comptez pas les trajectoires comme autant de preuves.");
+  if (dataNote) log(dataNote);
   for (const policy of policies) {
     const o = out[policy];
     log("");
@@ -167,6 +215,9 @@ export function entryCommand(args: string[], log: (s: string) => void = console.
         : `  Percentile moyen de la règle parmi les entrées au hasard : ${o.meanBeatPct.toFixed(0)} % (50 % = aucun avantage). ` +
             `≥ 95 % sur ${o.strongPct.toFixed(0)} % des trajectoires, ≤ 5 % sur ${o.weakPct.toFixed(0)} % (au hasard : environ 5 % et 5 %).`,
     );
+    if (series.length > 1 && series.length <= 12) {
+      log(`  Percentile par ${blocksMode ? "bloc" : "trajectoire"} : ${o.beats.map((b) => b.toFixed(0) + " %").join(" · ")}`);
+    }
   }
   if (note) log("\n" + note);
 }

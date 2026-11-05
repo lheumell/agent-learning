@@ -78,11 +78,33 @@ npm run entry -- --rule breakout --csv data/history/FICHIER.csv --holdout 0.2 --
 
 Limites propres à ce test : les fenêtres de vrais prix **se recouvrent** (elles ne sont pas des preuves indépendantes) ; trois ans d'une seule paire restent peu ; les intérêts d'emprunt de la marge et les frais de financement ne sont pas modélisés ; seuls les prix de clôture sont vus.
 
+### Lire un résultat sans se tromper
+
+Un percentile élevé sur un seul fichier ne suffit pas. Les pièges, dans l'ordre où ils apparaissent :
+
+1. **Une seule trajectoire est fragile.** Les pourcentages comme « 100 % des trajectoires » n'ont aucun sens quand il n'y en a qu'une.
+2. **Comparaisons multiples.** Deux règles × deux structures de sortie = quatre comparaisons sur les mêmes données. Sous l'hypothèse « aucun avantage », la probabilité qu'au moins une atteigne le 91e percentile est de **31 %** (1 − 0,91⁴). Le meilleur de plusieurs résultats est presque toujours flatteur.
+3. **Les mêmes entrées doivent donner des verdicts compatibles.** Une vraie qualité d'entrée devrait aider quelle que soit la sortie. Un 41 % avec une structure de sortie et un 91 % avec l'autre indique plutôt du bruit, ou l'effet d'épisodes particuliers sur la manière dont les stops se déclenchent.
+4. **La régularité dans le temps.** `--blocks 4` évalue 4 périodes consécutives, sans recouvrement, séparément. Avec un avantage réel (marché simulé qui revient à la moyenne) : 100 % · 100 % · 100 % · 100 %. Sans avantage (marche aléatoire simulée) : **43 % · 55 % · 88 % · 10 %**, moyenne 49 %. Sur du hasard pur, un bloc sur quatre peut donc sembler excellent.
+5. **Le financement.** En spot avec marge, ou sur un perpétuel, chaque heure de position coûte. `--financing` le prélève sur la marge ; à régler d'après le barème de votre plateforme. Un avantage qui disparaît avec un coût réaliste n'en est pas un.
+6. **Les variations extrêmes.** `--blocks` et `--holdout` affichent la plus forte variation sur une barre. Un stop placé à −10 % ne protège pas d'une chute de −20 % en une heure, ni d'un trou dans les données : la position est liquidée directement. Un « au moins une liquidation » à 100 % malgré un stop vient de là.
+
+**Fixez vos critères avant de lancer les vérifications**, pas après. Exemple de critères pour un candidat : percentile moyen par bloc ≥ 75 %, au moins 3 blocs sur 4 ≥ 60 %, et un résultat qui reste supérieur au hasard avec un financement pessimiste. Si les critères ne sont pas remplis, c'est une absence de preuve : on ne consomme pas la période réservée (`--final`).
+
+```bash
+npm run entry -- --rule dip --csv data/history/FICHIER.csv --holdout 0.2 --blocks 4 --lookback 48 --drop 0.04 --tp 0.05 --stake 0.1 --leverage 5 --policy bounded
+npm run entry -- --rule dip --csv data/history/FICHIER.csv --holdout 0.2 --lookback 48 --drop 0.04 --tp 0.05 --stake 0.1 --leverage 5 --policy bounded --financing 0.00001
+npm run entry -- --rule dip --csv data/history/FICHIER.csv --holdout 0.2 --lookback 48 --drop 0.04 --tp 0.05 --stake 0.1 --leverage 5 --policy bounded --financing 0.00003
+npm run entry -- --rule dip --csv data/history/FICHIER.csv --holdout 0.2 --lookback 48 --drop 0.04 --tp 0.05 --stake 0.1 --leverage 5 --policy bounded --financing 0.0001
+```
+
+(0,00001 par heure = 0,001 % du notionnel par heure, environ 0,024 % par jour ; 0,0001 = environ 0,24 % par jour. Ce sont des ordres de grandeur pour la sensibilité, pas le tarif d'une plateforme.)
+
 ## Limites du simulateur
 
 - **Les premiers résultats de ce document (`npm run ruin`) utilisent des entrées sans avantage.** Si votre règle d'entrée en a un, la conclusion change pour *votre* stratégie : c'est ce que teste `npm run entry` (section précédente).
 - **Seuls les prix de clôture sont vus** : les mèches qui déclenchent une liquidation réelle sont invisibles. Le risque réel est plus élevé.
-- Pas de financement (funding), pas de glissement, marge de maintenance générique.
+- Financement : ignoré par défaut (`--financing` pour le prendre en compte). Pas de glissement, marge de maintenance générique.
 - Trajectoires simulées (marche aléatoire) : un vrai marché a des chocs, des tendances et des régimes.
 
 ## Cadre : pour qu'une perte soit de la malchance et pas une bêtise

@@ -12,6 +12,7 @@ export const RUIN_USAGE = `Usage : npm run ruin -- [options]
   --trigger 0.03     (reinject) réinjecte à moins de 3 % de la liquidation   --fraction 1   part du capital libre injectée
   --hold 2000        durée max d'une position (barres)       --cooldown 5   attente entre deux positions
   --fee 0.0005       frais par côté                           --mmr 0.005    marge de maintenance
+  --financing 0.00002  coût de financement par barre (part du notionnel) : intérêts d'emprunt / funding de VOTRE plateforme
   Données : --seeds 300 --n 4000 --vol 0.007 --drift 0 --model gbm|ou|mom   (prix simulés)
         ou  --csv fichier.csv [--n 4000] : fenêtres glissantes de n barres sur de vrais prix (elles se recouvrent)
   L'exposition notionnelle = stake x leverage x wallet : au-dessus de 1, la ruine totale devient possible malgré la réinjection.`;
@@ -63,6 +64,7 @@ export function ruinCommand(args: string[], log: (s: string) => void = console.l
     stopLossPct: f.stop === undefined ? undefined : num("stop", 0),
     reinjectTrigger: num("trigger", DEFAULT_LEVERAGE.reinjectTrigger),
     reinjectFraction: num("fraction", DEFAULT_LEVERAGE.reinjectFraction),
+    financingRate: num("financing", 0),
     maxHoldBars: num("hold", DEFAULT_LEVERAGE.maxHoldBars),
     cooldownBars: num("cooldown", DEFAULT_LEVERAGE.cooldownBars),
   };
