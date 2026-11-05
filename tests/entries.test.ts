@@ -344,3 +344,20 @@ describe("blocs et diagnostic des données", () => {
     expect(run3(["--rule", "dip", "--csv", f, "--holdout", "0.2", "--random", "5", "--policy", "bounded"])).toMatch(/Un stop ne protège pas/);
   });
 });
+
+describe("références absolues", () => {
+  it("affiche « garder l'actif » et « ne rien faire » à côté du hasard", () => {
+    const prices = syntheticPrices({ n: 5000, seed: 12, model: "gbm" });
+    const dir = mkdtempSync(join(tmpdir(), "refs-"));
+    const csv = join(dir, "p.csv");
+    writeFileSync(csv, "close\n" + prices.join("\n") + "\n");
+    const out: string[] = [];
+    entryCommand(["--rule", "dip", "--csv", csv, "--holdout", "0.2", "--random", "5", "--policy", "bounded"], (x) => out.push(x));
+    const txt = out.join("\n");
+    const dev = prices.slice(0, Math.floor(5000 * 0.8));
+    const hold = (dev[dev.length - 1] / dev[0] - 1) * 100;
+    expect(txt).toContain(`garder l'actif ${hold >= 0 ? "+" : ""}${hold.toFixed(1)} %`);
+    expect(txt).toMatch(/ne rien faire \+0\.0 %/);
+    expect(txt).toMatch(/doit aussi battre ces deux références/);
+  });
+});

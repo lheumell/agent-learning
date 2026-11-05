@@ -135,6 +135,7 @@ export function entryCommand(args: string[], log: (s: string) => void = console.
   let series: number[][];
   let label: string;
   let note = "";
+  let holdFrom = 0; // première barre réellement évaluée (hors échauffement)
   if (f.csv) {
     const holdout = f.holdout === undefined ? (f.final === "true" ? 0.2 : undefined) : num("holdout", 0.2);
     if (f.final === "true" && holdout === undefined) throw new Error("--final demande --holdout");
@@ -145,6 +146,7 @@ export function entryCommand(args: string[], log: (s: string) => void = console.
         const looks = recordLook(deps.logPath ?? "data/holdout-log.json", `${f.csv}@${holdout}#entry:${ruleName}`);
         const warm = Math.min(lookback, sp.cut);
         series = [all.slice(sp.cut - warm)];
+        holdFrom = warm;
         label = `${f.csv}, PÉRIODE RÉSERVÉE (${sp.holdout.length} barres, avec ${warm} barres d'échauffement)`;
         note =
           looks === 1
@@ -219,5 +221,11 @@ export function entryCommand(args: string[], log: (s: string) => void = console.
       log(`  Percentile par ${blocksMode ? "bloc" : "trajectoire"} : ${o.beats.map((b) => b.toFixed(0) + " %").join(" · ")}`);
     }
   }
+  // Références ABSOLUES : le « hasard » est une référence relative et, avec des coûts élevés, une référence perdante.
+  // Une règle qui bat un hasard à −38 % n'est pas pour autant rentable : il faut aussi battre « ne rien faire » (0 %) et « garder ».
+  const holds = series.map((p) => (p[p.length - 1] / p[holdFrom] - 1) * 100).sort((a, b) => a - b);
+  log("");
+  log(`  Références absolues, même période, sans levier : garder l'actif ${pct(holds[Math.floor(holds.length / 2)])} (médiane) · ne rien faire ${pct(0)}`);
+  log("  Le « hasard » est une référence relative : avec des coûts élevés elle est perdante. Une règle doit aussi battre ces deux références, coûts déduits.");
   if (note) log("\n" + note);
 }
