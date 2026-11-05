@@ -31,7 +31,7 @@ Justifications, frontières de confiance et formats de fichiers : [`docs/ARCHITE
 Prérequis : **Node.js 22.12 ou plus** (les dépendances d'AgentKit et Vitest 5 l'exigent ; sur Node 20, npm ignorerait silencieusement les paquets de l'agent).
 
 ```bash
-npm install
+npm ci                                     # et non « npm install » : npm ci n'altère jamais package-lock.json
 npm test                                   # tous les tests, hors ligne
 npm run backtest -- --seeds 300            # la stratégie sur 300 séries simulées
 npm run history -- --days 365              # télécharge un an de bougies d'1 h (réseau requis)
@@ -55,6 +55,10 @@ docker compose logs -f paper               # voir passer les prix et les signaux
 docker compose run --rm paper backtest --seeds 100    # n'importe quelle commande du cœur
 docker compose down                        # arrêt propre (l'état est conservé dans ./data)
 ```
+
+**Dépannage.**
+- *`npm ci can only install packages when your package.json and package-lock.json are in sync` pendant le build.* Ce message ne devrait plus apparaître : l'image s'installe depuis son propre verrou minimal (`docker/package-lock.json`, uniquement `tsx` et `dotenv`), pas depuis le `package-lock.json` du projet. Si vous le voyez malgré tout, vous avez une ancienne version du dépôt (`git pull`). Cause historique : un `npm install` local avec npm 11 ou 12 réécrit `package-lock.json` d'une façon que le npm 10 de l'image refuse. Pour annuler ce genre de modification locale : `git checkout -- package-lock.json`.
+- *Le conteneur ne peut pas écrire dans `data/`.* Voir l'avertissement ci-dessous.
 
 ⚠ Le dossier `./data` doit exister avant `docker compose up` et appartenir à votre utilisateur (uid 1000 en général) ; sinon Docker le crée appartenant à root et le conteneur ne pourra pas y écrire.
 Le suivi papier est en conditions réelles de prix mais **la stratégie par défaut n'a pas d'avantage démontré** : c'est un outil pour comparer le papier au backtest, pas pour gagner de l'argent.

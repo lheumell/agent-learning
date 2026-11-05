@@ -1,0 +1,11 @@
+{
+  "name": "agent-learning-core",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Dépendances d'exécution de l'image Docker du cœur (voir tests/docker-deps.test.ts).",
+  "dependencies": {
+    "dotenv": "^18.0.9",
+    "tsx": "^4.23.15"
+  }
+}

@@ -32,7 +32,7 @@ async function loadAgentModules() {
     if (e?.code === "ERR_MODULE_NOT_FOUND" || e?.code === "MODULE_NOT_FOUND") {
       throw new Error(
         "Les paquets de l'agent (AgentKit, viem, SDK Anthropic) ne sont pas installés. " +
-          "Faites `npm install` sans --omit=optional. Détail : " + String(e.message).split("\n")[0],
+          "Faites `npm ci` (sans --omit=optional). Détail : " + String(e.message).split("\n")[0],
       );
     }
     throw e;

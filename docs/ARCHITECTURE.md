@@ -68,6 +68,8 @@ flowchart LR
 
 Les paquets de l'agent (AgentKit, viem, SDK Anthropic, zod) sont des **`optionalDependencies`** : l'image Docker du cœur ne les installe pas (≈ 12 Mo de dépendances au lieu de ≈ 1,5 Go) et n'a donc ni code de wallet, ni accès à une clé.
 
+L'image s'installe depuis un **verrou dédié** (`docker/package.json` + `docker/package-lock.json`, seulement `tsx` et `dotenv`), pas depuis le `package-lock.json` du projet. Raison, constatée en réel : un `npm install` local avec npm 11 ou 12 réécrit le verrou principal d'une façon que le npm 10 de l'image refuse (`Missing: zod@3.25.76 from lock file`). `tests/docker-deps.test.ts` garantit que les deux `package.json` restent alignés et que le cœur n'importe aucun paquet absent de l'image.
+
 ## Frontières de confiance
 
 | Composant | Peut | Ne peut pas |
