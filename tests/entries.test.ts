@@ -361,3 +361,40 @@ describe("références absolues", () => {
     expect(txt).toMatch(/doit aussi battre ces deux références/);
   });
 });
+
+describe("--verdict", () => {
+  const prices = syntheticPrices({ n: 6000, seed: 21, model: "gbm" });
+  const csv = () => {
+    const dir = mkdtempSync(join(tmpdir(), "verdict-"));
+    const f = join(dir, "p.csv");
+    writeFileSync(f, "close\n" + prices.join("\n") + "\n");
+    return f;
+  };
+  const run4 = (args: string[]) => {
+    const out: string[] = [];
+    entryCommand(args, (s) => out.push(s));
+    return out.join("\n");
+  };
+  it("applique les quatre critères et conclut sans interprétation", () => {
+    const txt = run4(["--rule", "dip", "--csv", csv(), "--blocks", "3", "--random", "6", "--policy", "bounded", "--verdict"]);
+    expect(txt).toMatch(/VERDICT \(critères fixés d'avance/);
+    expect(txt).toMatch(/\[(OUI|NON)\] percentile moyen contre le hasard ≥ 65 %/);
+    expect(txt).toMatch(/\[(OUI|NON)\] au moins 15 positions/);
+    expect(txt).toMatch(/\[(OUI|NON)\] capital final médian > 0 %/);
+    expect(txt).toMatch(/\[(OUI|NON)\] capital final médian > garder l'actif/);
+    expect(txt).toMatch(/→ (Tous les critères|Critères NON remplis)/);
+  });
+  it("mentionne le hasard FILTRÉ quand un filtre est actif", () => {
+    const txt = run4(["--rule", "dip", "--csv", csv(), "--blocks", "3", "--gate", "range", "--random", "6", "--policy", "bounded", "--verdict"]);
+    expect(txt).toMatch(/contre le hasard FILTRÉ/);
+  });
+  it("les seuils se règlent et un seuil impossible échoue", () => {
+    const txt = run4(["--rule", "dip", "--csv", csv(), "--blocks", "3", "--random", "6", "--policy", "bounded", "--verdict", "--min-percentile", "101", "--min-positions", "100000"]);
+    expect(txt).toMatch(/\[NON\] percentile moyen/);
+    expect(txt).toMatch(/\[NON\] au moins 100000 positions/);
+    expect(txt).toMatch(/Critères NON remplis : pas de preuve/);
+  });
+  it("exige une seule politique", () => {
+    expect(() => run4(["--rule", "dip", "--csv", csv(), "--blocks", "3", "--random", "6", "--verdict"])).toThrow(/--verdict exige une seule politique/);
+  });
+});

@@ -24,6 +24,9 @@ export const ENTRY_USAGE = `Usage : npm run entry -- --rule dip|breakout [option
         ou  --csv fichier.csv [--n 4000] (fenêtres glissantes de vrais prix, qui se recouvrent)
   Période réservée (CSV) : --holdout 0.2 (travailler sans les 20 % finaux) puis --final (les évaluer UNE fois)
   Régularité (CSV) : --blocks 4 découpe en 4 périodes consécutives sans recouvrement et évalue chacune séparément
+  Verdict : --verdict applique des critères FIXÉS D'AVANCE (exige --policy reinject|bounded) :
+            percentile moyen >= --min-percentile (65) contre le hasard (filtré si --gate), au moins --min-positions (15)
+            positions par trajectoire (médiane), capital final médian > 0 % et > « garder l'actif »
   --random 30        tirages au hasard par trajectoire (200 s'il n'y a qu'une trajectoire)`;
 
 const pct = (x: number, d = 1) => `${x >= 0 ? "+" : ""}${x.toFixed(d)} %`;
@@ -133,7 +136,7 @@ export function largeMoves(prices: number[], threshold = 0.08): { maxPct: number
 
 export function entryCommand(args: string[], log: (s: string) => void = console.log, deps: { logPath?: string } = {}) {
   if (args.includes("--help")) return log(ENTRY_USAGE);
-  const f = parseFlags(args, ["final"]);
+  const f = parseFlags(args, ["final", "verdict"]);
   const num = (k: string, d: number) => {
     const v = f[k] === undefined ? d : Number(f[k]);
     if (!Number.isFinite(v)) throw new Error(`--${k} doit être un nombre`);
@@ -274,5 +277,27 @@ export function entryCommand(args: string[], log: (s: string) => void = console.
   log("");
   log(`  Références absolues, même période, sans levier : garder l'actif ${pct(holds[Math.floor(holds.length / 2)])} (médiane) · ne rien faire ${pct(0)}`);
   log("  Le « hasard » est une référence relative : avec des coûts élevés elle est perdante. Une règle doit aussi battre ces deux références, coûts déduits.");
+  if (f.verdict === "true") {
+    if (policies.length !== 1) throw new Error("--verdict exige une seule politique : --policy reinject ou --policy bounded");
+    const o = out[policies[0]];
+    const holdMedian = holds[Math.floor(holds.length / 2)];
+    const minPct = num("min-percentile", 65);
+    const minPos = num("min-positions", 15);
+    const checks: [boolean, string][] = [
+      [o.meanBeatPct >= minPct, `percentile moyen contre le hasard${makeGate ? " FILTRÉ" : ""} ≥ ${minPct} % : ${o.meanBeatPct.toFixed(0)} %`],
+      [o.rule.medianTrades >= minPos, `au moins ${minPos} positions par trajectoire (médiane) : ${o.rule.medianTrades.toFixed(0)}`],
+      [o.rule.medianFinalPct > 0, `capital final médian > 0 % : ${pct(o.rule.medianFinalPct)}`],
+      [o.rule.medianFinalPct > holdMedian, `capital final médian > garder l'actif : ${pct(o.rule.medianFinalPct)} contre ${pct(holdMedian)}`],
+    ];
+    log("");
+    log("  VERDICT (critères fixés d'avance, pour CET actif) :");
+    for (const [ok, text] of checks) log(`    [${ok ? "OUI" : "NON"}] ${text}`);
+    const all = checks.every(([ok]) => ok);
+    log(
+      all
+        ? "  → Tous les critères sont remplis pour cet actif. Il faut qu'ils le soient aussi pour l'autre actif avant toute autre étape."
+        : "  → Critères NON remplis : pas de preuve. Ne pas ouvrir la période réservée, ne pas ajuster les paramètres.",
+    );
+  }
   if (note) log("\n" + note);
 }

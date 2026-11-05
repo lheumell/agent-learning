@@ -23,6 +23,7 @@ Rien ici ne touche à de l'argent réel. Le cœur ne détient aucune clé.
 | Conteneurs | **Docker** (`node:22-slim`) + **Compose**, utilisateur non privilégié, système de fichiers en lecture seule |
 
 Justifications, frontières de confiance et formats de fichiers : [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+Protocole de test fixé d'avance (règle d'entrée dans une situation chiffrée) : [`docs/PRE-ENREGISTREMENT-range.md`](docs/PRE-ENREGISTREMENT-range.md).
 
 ## Démarrage rapide
 
