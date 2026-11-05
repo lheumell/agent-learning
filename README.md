@@ -1,11 +1,106 @@
-# agent-learning : comprendre un agent IA avec wallet (testnet)
+# agent-learning : évaluer une stratégie de trading et comprendre un agent IA, sans argent réel
 
-Un petit projet pour comprendre comment un agent IA agit sur une blockchain, **sans risque** :
+Projet pédagogique complet, en deux moitiés séparées :
 
-- réseau **Base Sepolia uniquement** (testnet, fonds sans valeur), fixé en dur dans le code ;
-- **Coinbase AgentKit** pour les actions on-chain, **Claude** comme cerveau ;
-- un **garde-fou en code** (pas en prompt) qui plafonne les dépenses ;
-- mode **simulation (DRY_RUN) par défaut**.
+1. **Le cœur : évaluer honnêtement une stratégie de trading.** Données réelles, backtest sans biais d'anticipation, walk-forward, cas témoins, période réservée, trading **papier** en continu (argent fictif) et **tableau de bord** local.
+2. **L'agent : comprendre comment un agent IA agit sur une blockchain.** Boucle Claude ↔ outils, wallet de **testnet** (Base Sepolia, fonds sans valeur) borné par un **garde-fou en code**, jamais par un prompt.
+
+Rien ici ne touche à de l'argent réel. Le cœur ne détient aucune clé.
+
+> **Verdict actuel sur données réelles** (ETH-USD, bougies d'1 h, 1 an, 33 fenêtres de test) : le croisement de moyennes mobiles **n'a pas d'avantage démontré**. Optimisé : −36,6 % cumulés sur les fenêtres de test, contre −22,1 % pour « acheter et garder » ; 9 fenêtres sur 33 positives ; +0,99 % par 100 barres à l'entraînement contre −0,52 % en test. C'est le même schéma que sur une marche aléatoire simulée : le test a fait son travail, qui est de dire non avant qu'on y mette de l'argent. Voir les cas témoins plus bas pour la preuve que ce test sait aussi dire oui.
+
+## Stack technique
+
+| Domaine | Choix |
+|---|---|
+| Langage | **TypeScript 5.9** (strict, modules ES), **Node.js ≥ 20**, exécuté par **tsx** (pas d'étape de build) |
+| Tests / CI | **Vitest 5** (tous hors ligne) · **GitHub Actions** (Node 20 et 22 + image Docker) |
+| Données de marché | API publique **Coinbase Exchange** (ticker et bougies, sans clé). Pyth écarté : son prix exige une authentification (401) |
+| Agent IA | **SDK Anthropic** (Claude) · **Coinbase AgentKit** 0.10 · **viem** · **zod** |
+| Blockchain | **Base Sepolia** (testnet), fixé en dur |
+| Stockage | Fichiers **JSON / JSONL** (pas de base de données) |
+| Tableau de bord | **`node:http`** + HTML/SVG sans framework, CSP stricte, lecture seule |
+| Conteneurs | **Docker** (`node:22-slim`) + **Compose**, utilisateur non privilégié, système de fichiers en lecture seule |
+
+Justifications, frontières de confiance et formats de fichiers : [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+## Démarrage rapide
+
+### 1. En local, sans aucune clé (le cœur)
+
+Prérequis : Node.js 20 ou plus.
+
+```bash
+npm install
+npm test                                   # tous les tests, hors ligne
+npm run backtest -- --seeds 300            # la stratégie sur 300 séries simulées
+npm run history -- --days 365              # télécharge un an de bougies d'1 h (réseau requis)
+npm run walkforward -- --csv data/history/FICHIER.csv --holdout 0.2
+npm run paper                              # trading papier en continu (Ctrl+C pour arrêter)
+npm run dashboard                          # http://localhost:8787 (dans un autre terminal)
+```
+
+### 2. Avec Docker : suivi continu + tableau de bord
+
+```bash
+mkdir -p data
+docker compose up -d --build
+```
+
+Ouvrez http://localhost:8787. Le service `paper` suit ETH-USD une fois par minute avec de l'argent fictif et redémarre tout seul ; le service `dashboard` affiche son état en lecture seule.
+Ces conteneurs n'ont **ni wallet, ni clé, ni paquets de l'agent** (≈ 12 Mo de dépendances), tournent sans privilèges, avec un système de fichiers en lecture seule, et le port n'est publié que sur `127.0.0.1`.
+
+```bash
+docker compose logs -f paper               # voir passer les prix et les signaux
+docker compose run --rm paper backtest --seeds 100    # n'importe quelle commande du cœur
+docker compose down                        # arrêt propre (l'état est conservé dans ./data)
+```
+
+⚠ Le dossier `./data` doit exister avant `docker compose up` et appartenir à votre utilisateur (uid 1000 en général) ; sinon Docker le crée appartenant à root et le conteneur ne pourra pas y écrire.
+Le suivi papier est en conditions réelles de prix mais **la stratégie par défaut n'a pas d'avantage démontré** : c'est un outil pour comparer le papier au backtest, pas pour gagner de l'argent.
+
+### 3. L'agent Claude avec un wallet de testnet (optionnel)
+
+Voir « Démarrer l'agent (testnet) » plus bas : il faut une clé API Anthropic et de l'ETH de test.
+
+## Structure du projet
+
+```
+src/
+  ── cœur (aucune clé) ──────────────────────────────
+  prices.ts          sources de prix (Coinbase) + contrôle qualité
+  history.ts         import de bougies historiques en CSV
+  strategy.ts        SMA et retour à la moyenne (fonctions pures)
+  strategies.ts      choix de la stratégie en ligne de commande
+  portfolio.ts       exécution : frais, slippage (partagée backtest et papier)
+  backtest.ts        simulateur sans biais d'anticipation
+  walkforward.ts     optimisation sur le passé, jugement sur du neuf
+  holdout.ts         période réservée, regards comptés
+  simulate.ts        prix simulés reproductibles (marche aléatoire, retour à la moyenne)
+  paper.ts           trader papier : état persistant, reprise, journal
+  dashboard.ts       API locale en lecture seule
+  dashboard-page.ts  page (HTML/SVG, CSP stricte)
+  *-cli.ts, index.ts commandes
+  ── agent (optionnel, clés de TEST) ────────────────
+  agent.ts           boucle Claude ↔ outils
+  agent-tools.ts     outils en lecture seule : get_price, get_paper_status
+  guard.ts           plafonds de dépense, kill switch, audit
+  wallet.ts          wallet AgentKit dont toutes les transactions passent par le garde-fou
+tests/               hors ligne, y compris cas témoins et tests de sécurité du tableau de bord
+docs/ARCHITECTURE.md schéma, frontières de confiance, formats de fichiers, décisions
+Dockerfile, docker-compose.yml
+```
+
+## Tableau de bord (`src/dashboard.ts`)
+
+```bash
+npm run dashboard            # http://localhost:8787
+npm run dashboard -- --port 9000
+```
+
+Capital de la stratégie contre « acheter et garder », indicateurs (rendement, frais, allers-retours, taux de réussite), derniers trades, prix refusés et journal du garde-fou. Il se rafraîchit toutes les 10 secondes et avertit si aucun prix n'est arrivé depuis plus de 5 minutes.
+Lecture seule : il n'écrit rien, ne lance rien et n'a aucun accès au wallet. Il n'écoute que sur `127.0.0.1`, refuse tout en-tête `Host` non local (DNS rebinding) et toute méthode autre que GET/HEAD, et n'insère jamais de données dans la page autrement qu'en texte.
+`--expose` (utilisé dans Docker) écoute sur toutes les interfaces : **il n'y a aucune authentification**, ne l'exposez pas sur un réseau non fiable.
 
 ## Comment ça marche
 
@@ -28,7 +123,7 @@ Vous ──prompt──▶ boucle agent (src/agent.ts)
 **L'idée clé :** le LLM propose, le code dispose. Les limites vivent dans `Guard`, que le
 modèle ne peut ni lire ni modifier. Même une prompt injection ne peut pas dépasser le plafond.
 
-## Démarrage
+## Démarrer l'agent (testnet)
 
 ```bash
 npm install
@@ -229,14 +324,15 @@ Pas dans ce projet : la chain est codée en dur sur Base Sepolia et le garde-fou
 
 ## Intégration continue
 
-`.github/workflows/ci.yml` lance le typecheck et les 88 tests à chaque push sur `main` et à chaque pull request, sur Node 20 et Node 22.
+`.github/workflows/ci.yml` lance le typecheck et tous les tests à chaque push sur `main` et à chaque pull request, sur Node 20 et Node 22. Un second job construit l'image Docker, vérifie qu'elle n'embarque pas les paquets de l'agent et teste le tableau de bord dans un conteneur durci (lecture seule, sans privilèges).
 Les tests tournent **hors ligne** et n'ont besoin d'aucun secret : n'ajoutez jamais de clé API ni de clé privée aux secrets de ce dépôt pour la CI.
 
 ## Commandes
 
 | Commande | Rôle |
 |---|---|
-| `npm run wallet` | génère/affiche le wallet de test |
+| `npm run dashboard` | tableau de bord local en lecture seule (http://localhost:8787) |
+| `npm run wallet` | génère/affiche le wallet de test (paquets de l'agent requis) |
 | `npm run holdout -- --csv fichier.csv` | évalue UNE stratégie figée sur la fin des données mise de côté (chaque regard est compté) |
 | `npm run history -- --days 90` | télécharge des bougies historiques (Coinbase Exchange, sans clé) en CSV |
 | `npm run walkforward -- --seeds 300` | test walk-forward : paramètres choisis sur le passé, jugés sur des données jamais vues |
@@ -245,7 +341,7 @@ Les tests tournent **hors ligne** et n'ont besoin d'aucun secret : n'ajoutez jam
 | `npm run price -- ETH` | affiche le prix (Coinbase) après contrôle de qualité |
 | `npm run agent -- "…"` | lance l'agent avec une instruction |
 | `npm run audit` | affiche le journal du garde-fou (`data/audit.jsonl`) |
-| `npm test` | tests du garde-fou et du wallet (hors ligne) |
+| `npm test` | tous les tests, hors ligne |
 | `npm run typecheck` | vérification TypeScript |
 
 ## Où lire le code
@@ -255,6 +351,8 @@ Les tests tournent **hors ligne** et n'ont besoin d'aucun secret : n'ajoutez jam
 | `src/guard.ts` | les règles (le fichier le plus important) |
 | `src/wallet.ts` | branche le garde-fou sur AgentKit |
 | `src/agent.ts` | la boucle agent : Claude ↔ outils |
+| `src/agent-tools.ts` | outils en lecture seule pour l'agent : prix et état du trading papier |
+| `src/dashboard.ts`, `src/dashboard-page.ts` | tableau de bord local : API en lecture seule et page |
 | `src/config.ts` | lecture des limites depuis `.env` |
 | `src/strategy.ts` | stratégie de croisement de moyennes mobiles (SMA), pure et sans effet de bord |
 | `src/portfolio.ts` | le code d'exécution (achat, vente, frais, slippage), partagé par le backtest et le mode papier |
@@ -265,5 +363,5 @@ Les tests tournent **hors ligne** et n'ont besoin d'aucun secret : n'ajoutez jam
 | `src/paper.ts` | trader papier : prix en direct, état sauvegardé, reprise après redémarrage, journal |
 | `src/backtest.ts` | simulateur : frais, slippage, exécution à la barre suivante, comparaison à « acheter-garder » |
 | `src/simulate.ts` | prix simulés reproductibles (graine) + lecture de CSV |
-| `src/prices.ts` | sources de prix (Coinbase par défaut, Pyth) + contrôle de qualité + outil `get_price` |
+| `src/prices.ts` | sources de prix (Coinbase par défaut, Pyth) + contrôle de qualité |
 | `tests/` | ce que le garde-fou doit garantir |

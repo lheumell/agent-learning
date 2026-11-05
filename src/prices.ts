@@ -1,8 +1,3 @@
-import { customActionProvider } from "@coinbase/agentkit";
-import { z } from "zod/v3";
-
-// Le schéma est typé `any` à la frontière AgentKit : AgentKit embarque zod 3 et les types profonds
-// de zod font exploser tsc (mémoire). Le schéma reste validé à l'exécution.
 
 export interface PriceQuote {
   symbol: string;
@@ -198,22 +193,4 @@ export async function getCheckedPrice(
   const q = await source.getPrice(symbol);
   assertQuality(q, limits);
   return q;
-}
-
-/** Action AgentKit : donne à l'agent un outil `get_price` (lecture seule, ne dépense rien). */
-export function priceActionProvider(source: PriceSource, limits: QualityLimits = DEFAULT_LIMITS) {
-  return customActionProvider({
-    name: "get_price",
-    description:
-      "Donne le prix actuel en USD d'un actif crypto (ex. ETH, BTC, SOL) avec son horodatage. " +
-      "Refuse les prix périmés ou trop incertains. Lecture seule.",
-    schema: z.object({ symbol: z.string().describe("Symbole de l'actif, ex. ETH") }) as any,
-    invoke: async (args: { symbol: string }) => {
-      const q = await getCheckedPrice(source, args.symbol, limits);
-      return (
-        `${q.symbol}/USD = ${q.priceUsd.toFixed(2)} ` +
-        `(±${q.confidenceUsd.toFixed(2)}, publié ${q.publishedAt.toISOString()}, source ${q.source})`
-      );
-    },
-  });
 }

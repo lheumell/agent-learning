@@ -13,7 +13,7 @@ import type { Signal, Strategy } from "./strategy.js";
 
 const MAX_HISTORY = 2000;
 
-interface PaperState {
+export interface PaperState {
   version: 1;
   symbol: string;
   strategy: string;
@@ -183,31 +183,49 @@ export class PaperTrader {
   }
 
   status(): PaperStatus {
-    const s = this.state;
-    const pf = this.portfolio;
-    const equity = s.lastPrice === null ? pf.cfg.initialCashUsd : pf.equity(s.lastPrice);
-    const bh =
-      s.startPrice !== null && s.lastPrice !== null
-        ? (buyAndHoldEquity(s.startPrice, s.lastPrice, pf.cfg) / pf.cfg.initialCashUsd - 1) * 100
-        : null;
-    return {
-      symbol: s.symbol,
-      strategy: s.strategy,
-      startedAt: s.startedAt,
-      ticks: s.tick,
-      skipped: s.skipped,
-      lastPrice: s.lastPrice,
-      equity,
-      returnPct: (equity / pf.cfg.initialCashUsd - 1) * 100,
-      buyHoldReturnPct: bh,
-      trades: pf.trades.length,
-      roundTrips: pf.roundTrips,
-      winRate: pf.roundTrips > 0 ? pf.wins / pf.roundTrips : null,
-      openPosition: pf.inPosition,
-      feesPaid: pf.feesPaid,
-      pending: s.pending,
-    };
+    return summarizeState({ ...this.state, portfolio: this.portfolio.snapshot() });
   }
+}
+
+/** Calcule le statut à partir du seul fichier d'état : sans stratégie, sans réseau. Sert au tableau de bord et à l'agent. */
+export function summarizeState(s: PaperState): PaperStatus {
+  const pf = Portfolio.restore(s.exec, s.portfolio);
+  const equity = s.lastPrice === null ? pf.cfg.initialCashUsd : pf.equity(s.lastPrice);
+  const bh =
+    s.startPrice !== null && s.lastPrice !== null
+      ? (buyAndHoldEquity(s.startPrice, s.lastPrice, pf.cfg) / pf.cfg.initialCashUsd - 1) * 100
+      : null;
+  return {
+    symbol: s.symbol,
+    strategy: s.strategy,
+    startedAt: s.startedAt,
+    ticks: s.tick,
+    skipped: s.skipped,
+    lastPrice: s.lastPrice,
+    equity,
+    returnPct: (equity / pf.cfg.initialCashUsd - 1) * 100,
+    buyHoldReturnPct: bh,
+    trades: pf.trades.length,
+    roundTrips: pf.roundTrips,
+    winRate: pf.roundTrips > 0 ? pf.wins / pf.roundTrips : null,
+    openPosition: pf.inPosition,
+    feesPaid: pf.feesPaid,
+    pending: s.pending,
+  };
+}
+
+/** Lit un fichier d'état en validant sa forme minimale. */
+export function readPaperState(path: string): PaperState {
+  let st: PaperState;
+  try {
+    st = JSON.parse(readFileSync(path, "utf8")) as PaperState;
+  } catch {
+    throw new Error(`fichier d'état illisible ou corrompu : ${path}`);
+  }
+  if (st?.version !== 1 || typeof st.symbol !== "string" || !st.portfolio || !st.exec) {
+    throw new Error(`fichier d'état invalide : ${path}`);
+  }
+  return st;
 }
 
 export interface RunOptions {

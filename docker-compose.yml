@@ -1,0 +1,40 @@
+# Suivi continu en trading PAPIER (argent fictif) + tableau de bord en lecture seule.
+#
+#   mkdir -p data          # une fois, pour que le dossier appartienne à votre utilisateur (uid 1000)
+#   docker compose up -d --build
+#   http://localhost:8787
+#
+# Aucun wallet, aucune clé, aucune transaction : ces services ne peuvent rien dépenser.
+x-hardening: &hardening
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  paper:
+    <<: *hardening
+    build: .
+    restart: unless-stopped
+    stop_grace_period: 30s # laisse finir le tick en cours (SIGTERM) avant l'arrêt
+    command: ["paper", "--symbol", "ETH", "--interval", "60"]
+    volumes:
+      - ./data:/app/data
+
+  dashboard:
+    <<: *hardening
+    build: .
+    restart: unless-stopped
+    # --expose : écoute dans le conteneur ; le port n'est publié que sur 127.0.0.1 de votre machine.
+    command: ["dashboard", "--expose", "--port", "8787"]
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - ./data:/app/data:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

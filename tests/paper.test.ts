@@ -188,3 +188,10 @@ describe("CLI papier", () => {
     expect(formatStatus(t.status())).toMatch(/capital : .* USD/);
   });
 });
+
+describe("CLI papier : choix de la stratégie", () => {
+  it("accepte --strategy zrev et refuse une stratégie inconnue avant toute requête", async () => {
+    await expect(paperCommand(["--strategy", "magic"], () => {})).rejects.toThrow(/stratégie inconnue/);
+    await expect(paperCommand(["--strategy", "zrev", "--window", "3"], () => {})).rejects.toThrow(/window/);
+  });
+});

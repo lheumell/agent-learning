@@ -1,25 +1,49 @@
 import "./no-telemetry.js";
 import "dotenv/config";
 import { existsSync, readFileSync } from "node:fs";
-import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-import type { Hex } from "viem";
-import { buildActions, runAgent } from "./agent.js";
-import { loadGuardConfig } from "./config.js";
-import { Guard } from "./guard.js";
 import { backtestCommand } from "./backtest-cli.js";
+import { dashboardCommand } from "./dashboard-cli.js";
+import { DEFAULT_AUDIT_PATH } from "./guard.js";
 import { historyCommand } from "./history-cli.js";
 import { holdoutCommand } from "./holdout-cli.js";
 import { paperCommand } from "./paper-cli.js";
-import { walkforwardCommand } from "./walkforward-cli.js";
 import { CoinbaseSource, getCheckedPrice } from "./prices.js";
-import { createWallet } from "./wallet.js";
+import { walkforwardCommand } from "./walkforward-cli.js";
 
 const [cmd, ...rest] = process.argv.slice(2);
 
+/**
+ * Deux familles de commandes :
+ *  - le CŒUR (prix, backtest, mode papier, tableau de bord…) : léger, démarre vite, ne détient aucune clé ;
+ *  - l'AGENT (wallet, agent) : charge AgentKit, viem et le SDK Anthropic, uniquement à la demande.
+ * Les paquets de l'agent sont des `optionalDependencies` : l'image Docker du trading ne les installe pas.
+ */
+async function loadAgentModules() {
+  try {
+    const [viemAccounts, agent, config, guard, wallet] = await Promise.all([
+      import("viem/accounts"),
+      import("./agent.js"),
+      import("./config.js"),
+      import("./guard.js"),
+      import("./wallet.js"),
+    ]);
+    return { viemAccounts, agent, config, guard, wallet };
+  } catch (e: any) {
+    if (e?.code === "ERR_MODULE_NOT_FOUND" || e?.code === "MODULE_NOT_FOUND") {
+      throw new Error(
+        "Les paquets de l'agent (AgentKit, viem, SDK Anthropic) ne sont pas installés. " +
+          "Faites `npm install` sans --omit=optional. Détail : " + String(e.message).split("\n")[0],
+      );
+    }
+    throw e;
+  }
+}
+
 async function main() {
   if (cmd === "wallet") {
-    const key = process.env.AGENT_PRIVATE_KEY || generatePrivateKey();
-    const addr = privateKeyToAccount(key as Hex).address;
+    const { viemAccounts } = await loadAgentModules();
+    const key = process.env.AGENT_PRIVATE_KEY || viemAccounts.generatePrivateKey();
+    const addr = viemAccounts.privateKeyToAccount(key as `0x${string}`).address;
     if (!process.env.AGENT_PRIVATE_KEY) {
       console.log("Nouvelle clé de TEST générée. Copiez-la dans .env :\n");
       console.log(`AGENT_PRIVATE_KEY=${key}\n`);
@@ -29,30 +53,12 @@ async function main() {
     return;
   }
 
-  if (cmd === "holdout") {
-    holdoutCommand(rest);
-    return;
-  }
-
-  if (cmd === "history") {
-    await historyCommand(rest);
-    return;
-  }
-
-  if (cmd === "walkforward") {
-    walkforwardCommand(rest);
-    return;
-  }
-
-  if (cmd === "paper") {
-    await paperCommand(rest);
-    return;
-  }
-
-  if (cmd === "backtest") {
-    backtestCommand(rest);
-    return;
-  }
+  if (cmd === "dashboard") return void (await dashboardCommand(rest));
+  if (cmd === "holdout") return holdoutCommand(rest);
+  if (cmd === "history") return void (await historyCommand(rest));
+  if (cmd === "walkforward") return walkforwardCommand(rest);
+  if (cmd === "paper") return void (await paperCommand(rest));
+  if (cmd === "backtest") return backtestCommand(rest);
 
   if (cmd === "price") {
     const symbol = rest[0] ?? "ETH";
@@ -62,8 +68,7 @@ async function main() {
   }
 
   if (cmd === "audit") {
-    const p = loadGuardConfig().auditPath;
-    console.log(existsSync(p) ? readFileSync(p, "utf8") : "(journal vide)");
+    console.log(existsSync(DEFAULT_AUDIT_PATH) ? readFileSync(DEFAULT_AUDIT_PATH, "utf8") : "(journal vide)");
     return;
   }
 
@@ -73,22 +78,26 @@ async function main() {
     if (!process.env.ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY manquante (.env)");
     if (!process.env.AGENT_PRIVATE_KEY) throw new Error("AGENT_PRIVATE_KEY manquante : lancez `npm run wallet`");
 
-    const cfg = loadGuardConfig();
+    const m = await loadAgentModules();
+    const cfg = m.config.loadGuardConfig();
     console.log(
       `Mode : ${cfg.dryRun ? "DRY RUN (simulation)" : "RÉEL sur testnet"} | ` +
         `max/tx ${cfg.maxPerTxWei} wei | max/jour ${cfg.maxPerDayWei} wei`,
     );
-    const wallet = createWallet(
-      process.env.AGENT_PRIVATE_KEY as Hex,
+    const wallet = m.wallet.createWallet(
+      process.env.AGENT_PRIVATE_KEY as `0x${string}`,
       process.env.RPC_URL ?? "https://sepolia.base.org",
-      new Guard(cfg),
+      new m.guard.Guard(cfg),
     );
-    const actions = await buildActions(wallet);
-    await runAgent(prompt, actions, { model: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5-5" });
+    const actions = await m.agent.buildActions(wallet);
+    await m.agent.runAgent(prompt, actions, { model: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5-5" });
     return;
   }
 
-  console.log("Commandes : npm run wallet | npm run holdout | npm run history | npm run walkforward | npm run paper | npm run backtest | npm run price -- ETH | npm run agent -- \"...\" | npm run audit");
+  console.log(
+    "Commandes : npm run paper | npm run dashboard | npm run backtest | npm run walkforward | npm run holdout | " +
+      "npm run history | npm run price -- ETH | npm run wallet | npm run agent -- \"...\" | npm run audit",
+  );
 }
 
 main().catch((e) => {

@@ -1,14 +1,16 @@
 import { parseFlags } from "./cli-utils.js";
 import { PaperTrader, runPaper, type PaperStatus } from "./paper.js";
 import { CoinbaseSource } from "./prices.js";
-import { SmaCrossover } from "./strategy.js";
+import { parseStrategyName, strategyFromFlags } from "./strategies.js";
 import { normalizeSymbol } from "./prices.js";
 
 export const PAPER_USAGE = `Usage : npm run paper -- [status] [options]
   --symbol ETH          actif suivi (défaut ETH)
   --interval 60         secondes entre deux prix (min. 5, défaut 60)
   --ticks N             s'arrête après N prix (défaut : tourne jusqu'à Ctrl+C)
-  --fast 10 --slow 30   fenêtres de la moyenne mobile
+  --strategy sma|zrev   famille de stratégie (défaut sma)
+  --fast 10 --slow 30   (sma) fenêtres de la moyenne mobile
+  --window 50 --entry 2 --exit 0   (zrev) fenêtre, seuil d'entrée et de sortie en z-score
   --capital 1000 --fee 0.001 --slippage 0.0005
   --reset               repart de zéro (efface l'état de ce symbole)
   status                affiche l'état sans rien lancer`;
@@ -41,12 +43,11 @@ export async function paperCommand(args: string[], log: (s: string) => void = co
   const symbol = normalizeSymbol(f.symbol ?? "ETH");
   const interval = num("interval", 60);
   if (interval < 5) throw new Error("--interval minimum : 5 secondes (ne martelez pas l'API publique)");
-  const fast = num("fast", 10);
-  const slow = num("slow", 30);
+  const strat = strategyFromFlags(parseStrategyName(f.strategy), num);
 
   const trader = PaperTrader.open({
     symbol,
-    makeStrategy: () => new SmaCrossover(fast, slow),
+    makeStrategy: strat.make,
     source: new CoinbaseSource(),
     exec: { initialCashUsd: num("capital", 1000), feeRate: num("fee", 0.001), slippageRate: num("slippage", 0.0005) },
     statePath: `data/paper-${symbol}.json`,
@@ -58,12 +59,14 @@ export async function paperCommand(args: string[], log: (s: string) => void = co
   if (isStatus) return log(formatStatus(trader.status()));
 
   let stop = false;
-  process.on("SIGINT", () => {
+  const onStop = () => {
     stop = true;
-    log("\nCtrl+C : arrêt après le tick en cours…");
-  });
+    log("\nArrêt demandé : fin après le tick en cours…");
+  };
+  process.on("SIGINT", onStop);
+  process.on("SIGTERM", onStop); // docker stop envoie SIGTERM
   log(`Mode PAPIER (aucun argent réel, aucune transaction) · ${symbol} · ${trader.status().strategy} · toutes les ${interval} s`);
-  if (slow * interval > 3600) log(`ℹ Il faut ${slow} prix avant le premier signal (~${Math.round((slow * interval) / 60)} min).`);
+  if (strat.warmup * interval > 3600) log(`ℹ Il faut ${strat.warmup} prix avant le premier signal (~${Math.round((strat.warmup * interval) / 60)} min).`);
   await runPaper(trader, {
     intervalSec: interval,
     maxTicks: f.ticks === undefined ? undefined : num("ticks", 0),

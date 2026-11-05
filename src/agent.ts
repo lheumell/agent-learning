@@ -1,21 +1,25 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { AgentKit, walletActionProvider, type Action } from "@coinbase/agentkit";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import { CoinbaseSource, priceActionProvider } from "./prices.js";
+import { paperStatusActionProvider, priceActionProvider } from "./agent-tools.js";
+import { CoinbaseSource } from "./prices.js";
 import type { GuardedWalletProvider } from "./wallet.js";
 
 const SYSTEM = `Tu es un agent d'apprentissage sur Base Sepolia (testnet, fonds sans valeur).
 Tu disposes d'outils pour consulter et utiliser un wallet. Règles :
 - Explique brièvement ce que tu fais avant chaque action.
 - Un garde-fou en code limite les dépenses ; si une action est refusée, rapporte-le tel quel, ne cherche pas à contourner.
-- Ne fais aucune transaction que l'utilisateur n'a pas demandée.`;
+- Ne fais aucune transaction que l'utilisateur n'a pas demandée.
+- Tu peux lire le prix (get_price) et l'état du trading papier (get_paper_status) pour expliquer et résumer.
+  Tu ne décides ni ne déclenches aucun ordre de trading : le trading papier est piloté par du code, pas par toi.
+- Ne fais jamais de prédiction de prix présentée comme une certitude.`;
 
 export async function buildActions(wallet: GuardedWalletProvider): Promise<Action[]> {
   const kit = await AgentKit.from({
     walletProvider: wallet,
-    // Commencez petit : solde, envoi d'ETH et prix (lecture seule).
+    // Commencez petit : solde, envoi d'ETH (borné par le garde-fou), prix et état du trading papier (lecture seule).
     // Pour ajouter des capacités (erc20, weth, defillama…), importez d'autres action providers.
-    actionProviders: [walletActionProvider(), priceActionProvider(new CoinbaseSource())],
+    actionProviders: [walletActionProvider(), priceActionProvider(new CoinbaseSource()), paperStatusActionProvider()],
   });
   return kit.getActions();
 }

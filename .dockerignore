@@ -1,0 +1,13 @@
+node_modules
+data
+.git
+.github
+.env
+.env.*
+!.env.example
+tests
+docs
+*.md
+vitest.config.ts
+Dockerfile
+docker-compose.yml

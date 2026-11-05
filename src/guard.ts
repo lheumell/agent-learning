@@ -1,6 +1,11 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
+/** Emplacements par défaut (sans dépendance lourde : `npm run audit` doit marcher sans les paquets de l'agent). */
+export const DEFAULT_KILL_SWITCH_PATH = "data/STOP";
+export const DEFAULT_STATE_PATH = "data/state.json";
+export const DEFAULT_AUDIT_PATH = "data/audit.jsonl";
+
 export interface GuardConfig {
   /** Chain IDs autorisés. Par défaut : Base Sepolia uniquement. */
   allowedChainIds: number[];

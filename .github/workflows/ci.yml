@@ -35,3 +35,32 @@ jobs:
         run: npm run typecheck
       - name: Tests (hors ligne, aucun secret requis)
         run: npm test
+
+  docker:
+    name: Image Docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Valider docker-compose.yml
+        run: docker compose config -q
+      - name: Construire l'image
+        run: docker build -t agent-learning:ci .
+      - name: Test de fumée du cœur (sans les paquets de l'agent)
+        run: |
+          docker run --rm agent-learning:ci backtest --seeds 3
+          out=$(docker run --rm agent-learning:ci wallet 2>&1 || true)
+          echo "$out"
+          echo "$out" | grep -q "ne sont pas installés"
+      - name: Test de fumée du tableau de bord (conteneur durci)
+        run: |
+          mkdir -p data
+          docker run -d --name dash --read-only --tmpfs /tmp --cap-drop ALL \
+            --security-opt no-new-privileges:true -p 127.0.0.1:8787:8787 \
+            -v "$PWD/data:/app/data:ro" agent-learning:ci dashboard --expose --port 8787
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8787/healthz; then echo; exit 0; fi
+            sleep 1
+          done
+          docker logs dash
+          exit 1
