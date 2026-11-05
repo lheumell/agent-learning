@@ -95,6 +95,11 @@ docs/ARCHITECTURE.md schéma, frontières de confiance, formats de fichiers, dé
 Dockerfile, docker-compose.yml
 ```
 
+## Prendre du risque sans faire n'importe quoi (`docs/CADRE-RISQUE.md`)
+
+Un simulateur de positions à levier avec liquidation compare « petit gain + on réinjecte quand on approche de la liquidation » à « risque borné ». Sur des prix sans aucun avantage, la réinjection donne **97,8 % de positions gagnantes** tout en perdant en médiane (−10,0 %), et au pire moment **100 % du capital** est engagé dans la position ; au-delà de 100 % d'exposition notionnelle, **20,7 %** des trajectoires perdent 90 % ou plus. Dans un marché haussier simulé, tout semble marcher, et garder sans levier fait mieux.
+Le document contient aussi un cadre de règles à écrire avant de trader (enveloppe de jeu fixe, aucune réinjection, stop décidé à l'avance, règle de pause, règle de retrait automatique des gains, journal) pour qu'une perte reste prévue. Il ne rend pas le trading rentable.
+
 ## Tableau de bord (`src/dashboard.ts`)
 
 ```bash
@@ -335,6 +340,7 @@ Les tests tournent **hors ligne** et n'ont besoin d'aucun secret : n'ajoutez jam
 
 | Commande | Rôle |
 |---|---|
+| `npm run ruin -- --seeds 300` | simule « petit gain + réinjection » contre « risque borné » avec levier et liquidation (voir `docs/CADRE-RISQUE.md`) |
 | `npm run dashboard` | tableau de bord local en lecture seule (http://localhost:8787) |
 | `npm run wallet` | génère/affiche le wallet de test (paquets de l'agent requis) |
 | `npm run holdout -- --csv fichier.csv` | évalue UNE stratégie figée sur la fin des données mise de côté (chaque regard est compté) |
@@ -363,6 +369,7 @@ Les tests tournent **hors ligne** et n'ont besoin d'aucun secret : n'ajoutez jam
 | `src/strategies.ts` | choix de la stratégie en ligne de commande (`sma`, `zrev`) |
 | `src/holdout.ts` | période réservée : découpe de la fin des données et compteur de regards |
 | `src/history.ts` | import de bougies historiques : pagination, nouvelles tentatives, contrôle des trous |
+| `src/leverage.ts`, `src/ruin-cli.ts` | simulateur de positions à levier avec liquidation : réinjection contre risque borné |
 | `src/walkforward.ts` | walk-forward : optimisation sur une fenêtre, évaluation sur la suivante, sans fuite du futur |
 | `src/paper.ts` | trader papier : prix en direct, état sauvegardé, reprise après redémarrage, journal |
 | `src/backtest.ts` | simulateur : frais, slippage, exécution à la barre suivante, comparaison à « acheter-garder » |

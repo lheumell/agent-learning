@@ -24,7 +24,7 @@ describe("dépendances de l'image Docker", () => {
   });
   it("le cœur n'importe aucun paquet absent de l'image", () => {
     // Fichiers chargés par les commandes du cœur : aucun import de paquet autre que dotenv/tsx/node:*.
-    const core = ["index", "no-telemetry", "backtest-cli", "dashboard-cli", "dashboard", "dashboard-page", "history-cli", "history", "holdout-cli", "holdout", "paper-cli", "paper", "prices", "walkforward-cli", "walkforward", "strategies", "strategy", "portfolio", "simulate", "backtest", "cli-utils", "guard"];
+    const core = ["index", "no-telemetry", "backtest-cli", "dashboard-cli", "dashboard", "dashboard-page", "history-cli", "history", "holdout-cli", "holdout", "paper-cli", "paper", "prices", "walkforward-cli", "walkforward", "strategies", "strategy", "portfolio", "simulate", "backtest", "cli-utils", "guard", "leverage", "ruin-cli"];
     const bare = /from\s+["']([^."'][^"']*)["']|import\s+["']([^."'][^"']*)["']/g;
     for (const f of core) {
       const src = readFileSync(`src/${f}.ts`, "utf8");

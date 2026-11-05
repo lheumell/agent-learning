@@ -15,7 +15,8 @@
     "walkforward": "tsx src/index.ts walkforward",
     "history": "tsx src/index.ts history",
     "holdout": "tsx src/index.ts holdout",
-    "dashboard": "tsx src/index.ts dashboard"
+    "dashboard": "tsx src/index.ts dashboard",
+    "ruin": "tsx src/index.ts ruin"
   },
   "keywords": [],
   "author": "",

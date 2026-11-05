@@ -7,6 +7,7 @@ import { DEFAULT_AUDIT_PATH } from "./guard.js";
 import { historyCommand } from "./history-cli.js";
 import { holdoutCommand } from "./holdout-cli.js";
 import { paperCommand } from "./paper-cli.js";
+import { ruinCommand } from "./ruin-cli.js";
 import { CoinbaseSource, getCheckedPrice } from "./prices.js";
 import { walkforwardCommand } from "./walkforward-cli.js";
 
@@ -59,6 +60,7 @@ async function main() {
   if (cmd === "walkforward") return walkforwardCommand(rest);
   if (cmd === "paper") return void (await paperCommand(rest));
   if (cmd === "backtest") return backtestCommand(rest);
+  if (cmd === "ruin") return ruinCommand(rest);
 
   if (cmd === "price") {
     const symbol = rest[0] ?? "ETH";
@@ -95,7 +97,7 @@ async function main() {
   }
 
   console.log(
-    "Commandes : npm run paper | npm run dashboard | npm run backtest | npm run walkforward | npm run holdout | " +
+    "Commandes : npm run paper | npm run dashboard | npm run backtest | npm run ruin | npm run walkforward | npm run holdout | " +
       "npm run history | npm run price -- ETH | npm run wallet | npm run agent -- \"...\" | npm run audit",
   );
 }
