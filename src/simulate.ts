@@ -25,22 +25,42 @@ export interface SyntheticOptions {
    * "ou"  : Ornstein-Uhlenbeck sur le log-prix, le prix est rappelé vers `start` (cas témoin positif :
    *         un avantage réel EXISTE, un bon test doit le détecter). `drift` est ignoré dans ce modèle.
    */
-  model?: "gbm" | "ou";
+  model?: "gbm" | "ou" | "mom";
   /** Force de rappel par barre pour "ou" (0.05 = demi-vie d'environ 14 barres). */
   theta?: number;
+  /**
+   * "mom" : la dérive évolue lentement (autorégressive, persistance `phi`) : le marché alterne des phases de hausse
+   * et de baisse qui durent des dizaines de barres. Cas témoin favorable à une stratégie de tendance ou de cassure.
+   * `phi` proche de 1 = tendances longues (défaut 0.98, durée caractéristique ≈ 50 barres).
+   */
+  phi?: number;
+  /** "mom" : amplitude des tendances, en multiples de `vol` (défaut 0.15 : dérive typique de ±0,15 écart-type par barre). */
+  trend?: number;
 }
 
 /** Mouvement brownien géométrique : les prix restent strictement positifs. */
 export function syntheticPrices(o: SyntheticOptions): number[] {
-  const { n, seed, start = 100, drift = 0, vol = 0.01, model = "gbm", theta = 0.05 } = o;
+  const { n, seed, start = 100, drift = 0, vol = 0.01, model = "gbm", theta = 0.05, phi = 0.98, trend = 0.15 } = o;
   if (!Number.isInteger(n) || n < 2) throw new Error("n doit être un entier >= 2");
-  if (model !== "gbm" && model !== "ou") throw new Error(`modèle inconnu : ${model} (gbm | ou)`);
+  if (model !== "gbm" && model !== "ou" && model !== "mom") throw new Error(`modèle inconnu : ${model} (gbm | ou | mom)`);
+  if (!(phi > -1 && phi < 1)) throw new Error("phi doit être dans ]-1, 1[");
+  if (!(trend >= 0)) throw new Error("trend doit être >= 0");
   if (!(theta > 0 && theta <= 1)) throw new Error("theta doit être dans ]0, 1]");
   const rnd = mulberry32(seed);
   const normal = () => {
     const u = Math.max(rnd(), 1e-12);
     return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rnd());
   };
+  if (model === "mom") {
+    const out = [start];
+    const eta = trend * vol * Math.sqrt(1 - phi * phi); // écart-type de la dérive = trend x vol
+    let mu = 0;
+    for (let i = 1; i < n; i++) {
+      mu = phi * mu + eta * normal();
+      out.push(out[i - 1] * Math.exp(drift + mu - (vol * vol) / 2 + vol * normal()));
+    }
+    return out;
+  }
   if (model === "ou") {
     const mu = Math.log(start);
     let x = mu;

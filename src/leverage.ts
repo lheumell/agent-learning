@@ -13,6 +13,18 @@
  *  - paramètres de marge génériques : ceux de votre plateforme diffèrent.
  */
 export type Policy = "reinject" | "bounded";
+export type Side = "long" | "short";
+export type EntrySignal = Side | null;
+
+/**
+ * Règle d'entrée : reçoit les prix un par un (jamais le futur). Appelée à CHAQUE barre pour tenir son état à jour ;
+ * le simulateur n'en tient compte que quand on est à plat. Le signal calculé à la clôture de la barre i
+ * s'exécute au prix de la barre i+1 (pas d'anticipation).
+ */
+export interface EntryRule {
+  readonly name: string;
+  onPrice(price: number): EntrySignal;
+}
 
 export interface LeverageConfig {
   /** Capital total au départ (marge + réserve). */
@@ -65,6 +77,14 @@ export interface PathResult {
   timeouts: number;
   /** Nombre de réinjections. */
   reinjections: number;
+  /** Positions ouvertes (clôturées ou non). */
+  entries: number;
+  longs: number;
+  shorts: number;
+  /** Barres où l'on était à plat, hors délai d'attente, avec de quoi ouvrir : le « temps disponible pour entrer ». */
+  eligibleBars: number;
+  /** Signaux d'entrée vus pendant ces barres (sert à calibrer une référence au hasard de même fréquence). */
+  signalsEligible: number;
   /** Durée de la plus longue position, en barres. */
   longestHoldBars: number;
   /** Pire baisse du patrimoine depuis son sommet (%). */
@@ -74,7 +94,8 @@ export interface PathResult {
   openAtEnd: boolean;
 }
 
-export function liquidationPrice(margin: number, qty: number, entry: number, maintenanceRate: number): number {
+export function liquidationPrice(margin: number, qty: number, entry: number, maintenanceRate: number, side: Side = "long"): number {
+  if (side === "short") return (margin + qty * entry) / (qty * (1 + maintenanceRate));
   return Math.max(0, (qty * entry - margin) / (qty * (1 - maintenanceRate)));
 }
 
@@ -93,7 +114,7 @@ export function validateLeverage(c: LeverageConfig) {
   if (!(c.cooldownBars >= 0)) throw new Error("cooldownBars doit être >= 0");
 }
 
-export function simulateLeveraged(prices: number[], config: Partial<LeverageConfig> = {}): PathResult {
+export function simulateLeveraged(prices: number[], config: Partial<LeverageConfig> = {}, rule?: EntryRule): PathResult {
   const c = { ...DEFAULT_LEVERAGE, ...config };
   validateLeverage(c);
   if (prices.length < 2) throw new Error("il faut au moins 2 prix");
@@ -102,20 +123,41 @@ export function simulateLeveraged(prices: number[], config: Partial<LeverageConf
 
   let cash = c.walletUsd;
   let inPos = false;
+  let side: Side = "long";
+  let sgn = 1;
   let margin = 0;
   let qty = 0;
   let entry = 0;
   let entryBar = 0;
   let cashBeforeOpen = 0;
   let cooldownLeft = 0;
+  let pending: Side | null = null;
   let peak = c.walletUsd;
-  const r = { trades: 0, wins: 0, liquidations: 0, stops: 0, timeouts: 0, reinjections: 0, longest: 0, maxDD: 0, peakRisk: 0 };
+  const r = { trades: 0, wins: 0, liquidations: 0, stops: 0, timeouts: 0, reinjections: 0, longest: 0, maxDD: 0, peakRisk: 0, entries: 0, longs: 0, shorts: 0, eligible: 0, signals: 0 };
+
+  const open = (s: Side, price: number, bar: number): boolean => {
+    const m = Math.min(cash * c.stakeFraction, cash / (1 + c.leverage * c.feeRate));
+    if (cash < MIN_CASH || m <= 0) return false;
+    const notional = m * c.leverage;
+    cashBeforeOpen = cash;
+    cash -= m + notional * c.feeRate;
+    margin = m;
+    qty = notional / price;
+    entry = price;
+    entryBar = bar;
+    side = s;
+    sgn = s === "long" ? 1 : -1;
+    inPos = true;
+    r.entries++;
+    if (s === "long") r.longs++;
+    else r.shorts++;
+    return true;
+  };
 
   const close = (kind: "tp" | "stop" | "timeout" | "liq", price: number, bar: number) => {
-    if (kind === "liq") {
-      // la marge est perdue ; ce qu'il en reste est déjà hors de `cash`
-    } else {
-      const proceeds = margin + qty * (price - entry) - qty * price * c.feeRate;
+    if (kind !== "liq") {
+      // en cas de liquidation, la marge est perdue et ce qu'il en reste est déjà hors de `cash`
+      const proceeds = margin + sgn * qty * (price - entry) - qty * price * c.feeRate;
       cash += Math.max(0, proceeds);
     }
     r.trades++;
@@ -131,15 +173,19 @@ export function simulateLeveraged(prices: number[], config: Partial<LeverageConf
   for (let i = 0; i < prices.length; i++) {
     const p = prices[i];
 
+    // 1) gérer la position ouverte
     if (inPos) {
-      const equity = margin + qty * (p - entry);
+      const equity = margin + sgn * qty * (p - entry);
+      const hitTp = side === "long" ? p >= entry * (1 + c.takeProfitPct) : p <= entry * (1 - c.takeProfitPct);
+      const hitStop = side === "long" ? p <= entry * (1 - stop) : p >= entry * (1 + stop);
       if (equity <= c.maintenanceRate * qty * p) close("liq", p, i);
-      else if (p >= entry * (1 + c.takeProfitPct)) close("tp", p, i);
-      else if (c.policy === "bounded" && p <= entry * (1 - stop)) close("stop", p, i);
+      else if (hitTp) close("tp", p, i);
+      else if (c.policy === "bounded" && hitStop) close("stop", p, i);
       else if (i - entryBar >= c.maxHoldBars) close("timeout", p, i);
       else if (c.policy === "reinject" && cash >= MIN_CASH) {
-        const pl = liquidationPrice(margin, qty, entry, c.maintenanceRate);
-        if ((p - pl) / p <= c.reinjectTrigger) {
+        const pl = liquidationPrice(margin, qty, entry, c.maintenanceRate, side);
+        const distance = side === "long" ? (p - pl) / p : (pl - p) / p;
+        if (distance <= c.reinjectTrigger) {
           const amount = cash * c.reinjectFraction;
           cash -= amount;
           margin += amount;
@@ -150,19 +196,27 @@ export function simulateLeveraged(prices: number[], config: Partial<LeverageConf
       cooldownLeft--;
     }
 
-    if (!inPos && cooldownLeft === 0 && i < prices.length - 1 && cash >= MIN_CASH) {
-      const m = Math.min(cash * c.stakeFraction, cash / (1 + c.leverage * c.feeRate));
-      const notional = m * c.leverage;
-      cashBeforeOpen = cash;
-      cash -= m + notional * c.feeRate;
-      margin = m;
-      qty = notional / p;
-      entry = p;
-      entryBar = i;
-      inPos = true;
+    // 2) ouvrir : sans règle, dès qu'on est à plat (même barre) ; avec règle, au prix de la barre qui suit le signal
+    const canEnter = !inPos && cooldownLeft === 0 && i < prices.length - 1 && cash >= MIN_CASH;
+    if (!rule) {
+      if (canEnter) open("long", p, i);
+    } else {
+      if (pending && !inPos) {
+        // jamais sur la dernière barre : la position ne pourrait plus évoluer et ne ferait que payer des frais
+        if (cooldownLeft === 0 && cash >= MIN_CASH && i < prices.length - 1) open(pending, p, i);
+        pending = null;
+      }
+      const signal = rule.onPrice(p); // appelée à chaque barre : la règle garde son état à jour
+      if (canEnter && !inPos) {
+        r.eligible++;
+        if (signal) {
+          r.signals++;
+          pending = signal;
+        }
+      }
     }
 
-    const posEquity = inPos ? Math.max(0, margin + qty * (p - entry)) : 0;
+    const posEquity = inPos ? Math.max(0, margin + sgn * qty * (p - entry)) : 0;
     const wealth = cash + posEquity;
     peak = Math.max(peak, wealth);
     r.maxDD = Math.max(r.maxDD, (peak - wealth) / peak);
@@ -172,7 +226,7 @@ export function simulateLeveraged(prices: number[], config: Partial<LeverageConf
   let openAtEnd = false;
   if (inPos) {
     const p = prices[prices.length - 1];
-    cash += Math.max(0, margin + qty * (p - entry) - qty * p * c.feeRate);
+    cash += Math.max(0, margin + sgn * qty * (p - entry) - qty * p * c.feeRate);
     r.longest = Math.max(r.longest, prices.length - 1 - entryBar);
     openAtEnd = true;
   }
@@ -185,6 +239,11 @@ export function simulateLeveraged(prices: number[], config: Partial<LeverageConf
     stops: r.stops,
     timeouts: r.timeouts,
     reinjections: r.reinjections,
+    entries: r.entries,
+    longs: r.longs,
+    shorts: r.shorts,
+    eligibleBars: r.eligible,
+    signalsEligible: r.signals,
     longestHoldBars: r.longest,
     maxDrawdownPct: r.maxDD * 100,
     peakAtRiskPct: r.peakRisk * 100,

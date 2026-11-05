@@ -340,6 +340,7 @@ Les tests tournent **hors ligne** et n'ont besoin d'aucun secret : n'ajoutez jam
 
 | Commande | Rôle |
 |---|---|
+| `npm run entry -- --rule dip --csv fichier.csv --holdout 0.2` | teste une règle d'entrée (achat après une baisse, cassure) contre des entrées au hasard, mêmes sorties |
 | `npm run ruin -- --seeds 300` | simule « petit gain + réinjection » contre « risque borné » avec levier et liquidation (voir `docs/CADRE-RISQUE.md`) |
 | `npm run dashboard` | tableau de bord local en lecture seule (http://localhost:8787) |
 | `npm run wallet` | génère/affiche le wallet de test (paquets de l'agent requis) |
@@ -369,6 +370,7 @@ Les tests tournent **hors ligne** et n'ont besoin d'aucun secret : n'ajoutez jam
 | `src/strategies.ts` | choix de la stratégie en ligne de commande (`sma`, `zrev`) |
 | `src/holdout.ts` | période réservée : découpe de la fin des données et compteur de regards |
 | `src/history.ts` | import de bougies historiques : pagination, nouvelles tentatives, contrôle des trous |
+| `src/entries.ts`, `src/entry-cli.ts` | règles d'entrée (achat après une baisse, cassure) comparées à des entrées au hasard de même fréquence |
 | `src/leverage.ts`, `src/ruin-cli.ts` | simulateur de positions à levier avec liquidation : réinjection contre risque borné |
 | `src/walkforward.ts` | walk-forward : optimisation sur une fenêtre, évaluation sur la suivante, sans fuite du futur |
 | `src/paper.ts` | trader papier : prix en direct, état sauvegardé, reprise après redémarrage, journal |

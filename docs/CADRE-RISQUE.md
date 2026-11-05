@@ -40,9 +40,47 @@ npm run ruin -- --seeds 300 --stake 0.1 --leverage 10 --drift 0.0001  # marché 
 npm run ruin -- --csv data/history/FICHIER.csv --stake 0.1 --leverage 10   # sur de vrais prix (fenêtres qui se recouvrent)
 ```
 
+## Ta règle d'entrée : ce qui est testable
+
+Description donnée : positions **dans les deux sens**, en **spot avec marge**, ouvertes **après une baisse (achat du creux)**, **sur une cassure**, ou **au feeling / sur une actu**, avec une prise de gain de **3 à 10 %**. Les seuils exacts ne sont pas connus.
+
+- **Testable, traduit en code** (`src/entries.ts`) : « achat après une baisse » (`dip` : achat quand le prix est X % sous le plus haut des N barres précédentes, vente à découvert quand il est X % au-dessus du plus bas) et « cassure d'un niveau » (`breakout` : achat quand le prix dépasse le plus haut des N barres précédentes, vente à découvert sous le plus bas).
+- **Non testable :** « au feeling, une actu ou un tweet ». Sans règle chiffrée, aucun backtest n'est possible. Si c'était la part principale de vos décisions, ce simulateur ne peut pas la juger.
+- Ces deux règles sont **des traductions, pas votre règle exacte**. Un résultat ne vaut que pour la traduction testée.
+
+Chaque règle est comparée à des **entrées au hasard de même fréquence, avec exactement les mêmes sorties** (prise de gain, stop ou réinjection, levier). Si une règle ne fait pas mieux que le hasard dans ces conditions, elle n'a pas d'avantage d'entrée : ce qui reste dans les résultats vient du marché et de la structure de risque.
+
+Cas témoins (le test doit savoir dire oui, non et « à l'envers », sinon il ne prouve rien). Sorties à risque borné, levier 5×, marge 10 %, prise de gain 5 % (3 % pour le marché qui revient à la moyenne) :
+
+| Marché simulé | Règle | Percentile moyen parmi les entrées au hasard | Lecture |
+|---|---|---|---|
+| Revient à la moyenne | achat après une baisse | **100 %** | détecte l'avantage |
+| À tendances persistantes | cassure | **90 %** (médiane +42,9 % contre −19,0 %) | détecte l'avantage |
+| À tendances persistantes | achat après une baisse | **9 %** (≤ 5 % sur la moitié des trajectoires) | pire que le hasard : règle inadaptée |
+| Marche aléatoire (aucun avantage possible) | achat après une baisse | 53 % | indiscernable du hasard |
+| Marche aléatoire | cassure | 55 % | indiscernable du hasard |
+
+50 % = aucun avantage. Les deux règles sont donc de bonnes traductions de ce qu'elles veulent capter : l'outil les distingue du hasard quand l'avantage existe, et ne voit rien quand il n'existe pas.
+
+### Procédure sur vos vrais prix (à suivre dans cet ordre)
+
+1. Récupérer le plus d'historique possible, sur plusieurs régimes : `npm run history -- --days 1095` (trois ans).
+2. Décider **maintenant**, avant de regarder le moindre résultat, d'un petit nombre de variantes (par exemple : `dip` avec N = 48 et X = 4 %, `breakout` avec N = 48 ; un seul couple de sorties). **Chaque variante essayée en plus augmente la chance de trouver un faux positif.**
+3. Travailler sans la fin des données :
+
+```bash
+npm run entry -- --rule dip      --csv data/history/FICHIER.csv --holdout 0.2 --lookback 48 --drop 0.04 --tp 0.05 --stake 0.1 --leverage 5
+npm run entry -- --rule breakout --csv data/history/FICHIER.csv --holdout 0.2 --lookback 48 --tp 0.05 --stake 0.1 --leverage 5
+```
+
+4. Seulement si une règle bat nettement le hasard (percentile moyen élevé **et** plusieurs fenêtres indépendantes), l'évaluer **une seule fois** sur la période réservée : même commande avec `--final` à la place de `--holdout`. Chaque regard supplémentaire est compté.
+5. Si elle passe, la suivre en mode papier plusieurs semaines avant d'engager quoi que ce soit.
+
+Limites propres à ce test : les fenêtres de vrais prix **se recouvrent** (elles ne sont pas des preuves indépendantes) ; trois ans d'une seule paire restent peu ; les intérêts d'emprunt de la marge et les frais de financement ne sont pas modélisés ; seuls les prix de clôture sont vus.
+
 ## Limites du simulateur
 
-- **Entrées sans avantage.** Si votre règle d'entrée en a un, la conclusion change pour *votre* stratégie. Le simulateur ne peut pas le savoir : il faut tester votre vraie règle (walk-forward, période réservée, puis papier).
+- **Les premiers résultats de ce document (`npm run ruin`) utilisent des entrées sans avantage.** Si votre règle d'entrée en a un, la conclusion change pour *votre* stratégie : c'est ce que teste `npm run entry` (section précédente).
 - **Seuls les prix de clôture sont vus** : les mèches qui déclenchent une liquidation réelle sont invisibles. Le risque réel est plus élevé.
 - Pas de financement (funding), pas de glissement, marge de maintenance générique.
 - Trajectoires simulées (marche aléatoire) : un vrai marché a des chocs, des tendances et des régimes.

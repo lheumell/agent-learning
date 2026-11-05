@@ -17,7 +17,7 @@ export const BACKTEST_USAGE = `Usage : npm run backtest -- [options]
   --strategy sma|zrev   famille de stratégie (défaut sma)
   --fast 10  --slow 30  (sma) fenêtres de la moyenne mobile
   --window 50 --entry 2 --exit 0   (zrev) fenêtre, seuil d'entrée et de sortie en z-score
-  --model gbm|ou        simulation : marche aléatoire ou retour à la moyenne (--theta 0.05)
+  --model gbm|ou|mom    simulation : marche aléatoire, retour à la moyenne (--theta 0.05) ou tendances (--phi 0.98 --trend 0.15)
   --fee 0.001  --slippage 0.0005`;
 
 export function backtestCommand(args: string[], log: (s: string) => void = console.log) {
@@ -31,8 +31,10 @@ export function backtestCommand(args: string[], log: (s: string) => void = conso
   const cfg = { feeRate: num("fee", 0.001), slippageRate: num("slippage", 0.0005) };
   const mk = strategyFromFlags(parseStrategyName(f.strategy), num).make;
   const model = f.model === undefined ? "gbm" : f.model;
-  if (model !== "gbm" && model !== "ou") throw new Error(`--model : gbm | ou (reçu "${model}")`);
+  if (model !== "gbm" && model !== "ou" && model !== "mom") throw new Error(`--model : gbm | ou | mom (reçu "${model}")`);
   const theta = num("theta", 0.05);
+  const phi = f.phi === undefined ? undefined : num("phi", 0.98);
+  const trend = f.trend === undefined ? undefined : num("trend", 0.15);
 
   if (f.csv) {
     const r = runBacktest(loadCsvPrices(f.csv), mk(), cfg);
@@ -45,7 +47,7 @@ export function backtestCommand(args: string[], log: (s: string) => void = conso
   const vol = num("vol", 0.01);
   const results: BacktestResult[] = [];
   for (let seed = 1; seed <= seeds; seed++) {
-    results.push(runBacktest(syntheticPrices({ n, seed, drift, vol, model, theta }), mk(), cfg));
+    results.push(runBacktest(syntheticPrices({ n, seed, drift, vol, model, theta, phi, trend }), mk(), cfg));
   }
 
   if (seeds === 1) return log(formatSingle(results[0]) + `\n(série simulée seed=1, n=${n}, drift=${drift}, vol=${vol})`);

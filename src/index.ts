@@ -3,6 +3,7 @@ import "dotenv/config";
 import { existsSync, readFileSync } from "node:fs";
 import { backtestCommand } from "./backtest-cli.js";
 import { dashboardCommand } from "./dashboard-cli.js";
+import { entryCommand } from "./entry-cli.js";
 import { DEFAULT_AUDIT_PATH } from "./guard.js";
 import { historyCommand } from "./history-cli.js";
 import { holdoutCommand } from "./holdout-cli.js";
@@ -61,6 +62,7 @@ async function main() {
   if (cmd === "paper") return void (await paperCommand(rest));
   if (cmd === "backtest") return backtestCommand(rest);
   if (cmd === "ruin") return ruinCommand(rest);
+  if (cmd === "entry") return entryCommand(rest);
 
   if (cmd === "price") {
     const symbol = rest[0] ?? "ETH";
@@ -97,7 +99,7 @@ async function main() {
   }
 
   console.log(
-    "Commandes : npm run paper | npm run dashboard | npm run backtest | npm run ruin | npm run walkforward | npm run holdout | " +
+    "Commandes : npm run paper | npm run dashboard | npm run backtest | npm run ruin | npm run entry | npm run walkforward | npm run holdout | " +
       "npm run history | npm run price -- ETH | npm run wallet | npm run agent -- \"...\" | npm run audit",
   );
 }

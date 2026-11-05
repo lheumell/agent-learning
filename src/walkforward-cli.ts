@@ -59,7 +59,7 @@ export function walkforwardCommand(args: string[], log: (s: string) => void = co
     const seeds = Math.max(1, Math.floor(num("seeds", 1)));
     const n = num("n", 2000);
     const model = f.model ?? "gbm";
-    const opts = { n, drift: num("drift", 0), vol: num("vol", 0.01), model: model as "gbm" | "ou", theta: num("theta", 0.05) };
+    const opts = { n, drift: num("drift", 0), vol: num("vol", 0.01), model: model as "gbm" | "ou" | "mom", theta: num("theta", 0.05), phi: f.phi === undefined ? undefined : num("phi", 0.98), trend: f.trend === undefined ? undefined : num("trend", 0.15) };
     series = Array.from({ length: seeds }, (_, i) => {
       const p = syntheticPrices({ ...opts, seed: i + 1 });
       return holdout === undefined ? p : splitHoldout(p, holdout).dev;

@@ -16,7 +16,8 @@
     "history": "tsx src/index.ts history",
     "holdout": "tsx src/index.ts holdout",
     "dashboard": "tsx src/index.ts dashboard",
-    "ruin": "tsx src/index.ts ruin"
+    "ruin": "tsx src/index.ts ruin",
+    "entry": "tsx src/index.ts entry"
   },
   "keywords": [],
   "author": "",

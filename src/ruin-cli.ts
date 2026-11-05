@@ -12,13 +12,13 @@ export const RUIN_USAGE = `Usage : npm run ruin -- [options]
   --trigger 0.03     (reinject) réinjecte à moins de 3 % de la liquidation   --fraction 1   part du capital libre injectée
   --hold 2000        durée max d'une position (barres)       --cooldown 5   attente entre deux positions
   --fee 0.0005       frais par côté                           --mmr 0.005    marge de maintenance
-  Données : --seeds 300 --n 4000 --vol 0.007 --drift 0   (marche aléatoire simulée)
+  Données : --seeds 300 --n 4000 --vol 0.007 --drift 0 --model gbm|ou|mom   (prix simulés)
         ou  --csv fichier.csv [--n 4000] : fenêtres glissantes de n barres sur de vrais prix (elles se recouvrent)
   L'exposition notionnelle = stake x leverage x wallet : au-dessus de 1, la ruine totale devient possible malgré la réinjection.`;
 
 const pct = (x: number, d = 1) => `${x >= 0 ? "+" : ""}${x.toFixed(d)} %`;
 
-function paths(f: Record<string, string>, num: (k: string, d: number) => number): { series: number[][]; label: string } {
+export function loadPaths(f: Record<string, string>, num: (k: string, d: number) => number): { series: number[][]; label: string } {
   const n = Math.floor(num("n", 4000));
   if (f.csv) {
     const all = loadCsvPrices(f.csv);
@@ -31,9 +31,13 @@ function paths(f: Record<string, string>, num: (k: string, d: number) => number)
   const seeds = Math.max(1, Math.floor(num("seeds", 300)));
   const vol = num("vol", 0.007);
   const drift = num("drift", 0);
+  const model = (f.model ?? "gbm") as "gbm" | "ou" | "mom";
+  const theta = num("theta", 0.05);
+  const phi = f.phi === undefined ? undefined : num("phi", 0.98);
+  const trend = f.trend === undefined ? undefined : num("trend", 0.15);
   return {
-    series: Array.from({ length: seeds }, (_, i) => syntheticPrices({ n, seed: i + 1, vol, drift })),
-    label: `${seeds} trajectoires simulées (marche aléatoire, n=${n}, vol=${vol}, drift=${drift})`,
+    series: Array.from({ length: seeds }, (_, i) => syntheticPrices({ n, seed: i + 1, vol, drift, model, theta, phi, trend })),
+    label: `${seeds} trajectoires simulées (modèle ${model}, n=${n}, vol=${vol}, drift=${drift})`,
   };
 }
 
@@ -62,7 +66,7 @@ export function ruinCommand(args: string[], log: (s: string) => void = console.l
     maxHoldBars: num("hold", DEFAULT_LEVERAGE.maxHoldBars),
     cooldownBars: num("cooldown", DEFAULT_LEVERAGE.cooldownBars),
   };
-  const { series, label } = paths(f, num);
+  const { series, label } = loadPaths(f, num);
   const exposure = base.stakeFraction * base.leverage;
   const policies: Policy[] = which === "both" ? ["reinject", "bounded"] : [which as Policy];
 
